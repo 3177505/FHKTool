@@ -67,39 +67,48 @@ body.layout-page main.layout-main-two {
   flex-shrink: 1;
 }
 
-#layout-canvas {
+#layout-canvas,
+#poster-canvas {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
+  overflow: hidden;
+  border: 1px solid $color-primary;
+  
+
+  .layout-wrapper,
+  .poster-wrapper {
+    flex-shrink: 0;
+  }
+}
+
+#layout-canvas {
   flex: 1;
   min-width: 0;
   height: 100%;
-  border: 1px solid $color-primary;
 
   .layout-wrapper {
     max-width: 100%;
     max-height: 100%;
-    width: auto;
-    height: auto;
 
     .layout-layer1,
     .layout-layer2 {
       max-height: 100%;
+      transform: translate(-15%, -15%);
+      @media (min-width: 1440px) and (min-height: 1080px) {
+        transform: none;
+      }
     }
-
   }
 }
 
 #poster-canvas {
-  display: flex;
-  justify-content: center;
-  align-items: center;
   flex-shrink: 0;
-  aspect-ratio: 1 / 1.414;
-  min-width: 280px;
+  aspect-ratio: 595 / 842;
+  min-width: 180px;
+  max-width: min(45%, 380px);
   max-height: 100%;
-  max-width: 50%;
-  border: 1px solid $color-primary;
 
   .poster-wrapper {
     width: 100%;
@@ -108,5 +117,26 @@ body.layout-page main.layout-main-two {
     max-height: 100%;
     background: $color-bg;
     position: relative;
+
+    .poster-layer1,
+    .poster-layer2 {
+      max-height: 100%;
+      transform: translate(-30%, -30%);
+      @media (min-width: 1440px) and (min-height: 1080px) {
+        transform: none;
+      }
+    }
+  }
+}
+
+@media (max-width: 1440px) {
+  body.layout-page main.layout-main-two {
+    gap: $spacing-sm;
+    padding: $spacing-xs;
+  }
+
+  #poster-canvas {
+    max-width: min(42%, 320px);
+    min-width: 160px;
   }
 }

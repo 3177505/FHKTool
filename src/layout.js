@@ -450,9 +450,8 @@ function renderLayout(state, stageIndices1, stageIndices2) {
 function scaleLayoutToFit(container) {
   const wrapper = container.querySelector('.layout-wrapper');
   if (!wrapper) return;
-  const main = container.closest('main');
-  const availW = container.clientWidth || (main?.clientWidth ?? window.innerWidth) / 2;
-  const availH = container.clientHeight || main?.clientHeight || window.innerHeight - 120;
+  const availW = container.clientWidth || 1;
+  const availH = container.clientHeight || 1;
   const scale = Math.min(1, availW / CANVAS_W, availH / CANVAS_H);
   wrapper.style.transform = scale < 1 ? `scale(${scale})` : 'none';
   wrapper.style.transformOrigin = 'center center';
@@ -711,10 +710,14 @@ export function initLayout(containerId) {
         reRender();
       });
 
-      window.addEventListener('resize', () => {
-        scaleLayoutToFit(container);
-        scalePosterToFit(document.getElementById('poster-canvas'));
-      });
+      const resizeHandler = () => {
+        requestAnimationFrame(() => {
+          scaleLayoutToFit(container);
+          scalePosterToFit(document.getElementById('poster-canvas'));
+        });
+      };
+      window.addEventListener('resize', resizeHandler);
+      resizeHandler();
 
       document.getElementById('poster-letter')?.addEventListener('input', reRender);
       document.getElementById('poster-letter')?.addEventListener('change', reRender);
