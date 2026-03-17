@@ -6,7 +6,6 @@ Vite + p5.js setup. Hot reload on save, ready for p5 sketches.
 
 ```bash
 npm install
-ln -sf ../dist/fonts public/fonts
 ```
 
 ## Run (with auto-refresh)
