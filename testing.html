@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bertin Variable Font Explorer – Testing</title>
+  <link rel="preload" href="/fonts/205TF-Bertin-DotSizeVAR.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="/src/style.scss">
+</head>
+<body class="testing-page">
+  <header>
+    <h1>Testing</h1>
+    <p><a href="/">Logo Layout</a> · <a href="/testing.html">Testing</a> · <a href="/filharmonie.html">Filharmonie</a></p>
+  </header>
+
+  <div class="top-right">
+    <div class="preview-random" id="previewRandom">
+      <span class="preview-glyph" id="previewRandomGlyph" data-font="">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+      <span class="preview-random-label" id="previewRandomLabel">—</span>
+      <button type="button" id="previewRandomBtn">Randomize</button>
+    </div>
+  </div>
+
+  <main>
+    <div class="overview" id="axisOverview">
+      Size → size only · Value → valu only · Shape → size, shap · Multi → shap, valu · Orientation → size, shap, orie · Rotation → size, shap, rota
+    </div>
+
+    <div class="view-tabs">
+      <button class="view-toggle active" data-view="controls">Sliders</button><span class="btn-sep">·</span>
+      <button class="view-toggle" data-view="grid">All 62 styles</button>
+    </div>
+
+    <section class="controls" id="viewControls">
+      <div class="control-group">
+        <label>Stylistic Set</label>
+        <select id="ssSelect">
+          <option value="">Default</option>
+          <option value="ss04" selected>ss04 Pattern</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>size <output id="sizeVal">500</output></label>
+        <input type="range" id="size" min="0" max="1000" value="500">
+      </div>
+      <div class="control-group">
+        <label>shap <output id="shapVal">500</output></label>
+        <input type="range" id="shap" min="0" max="1000" value="500">
+      </div>
+      <div class="control-group">
+        <label>valu <output id="valuVal">500</output></label>
+        <input type="range" id="valu" min="0" max="1000" value="500">
+      </div>
+      <div class="control-group">
+        <label>orie <output id="orieVal">0</output></label>
+        <input type="range" id="orie" min="0" max="180" value="0">
+      </div>
+      <div class="control-group">
+        <label>rota <output id="rotaVal">30</output></label>
+        <input type="range" id="rota" min="0" max="180" value="30">
+      </div>
+
+      <div class="control-group presets">
+        <label>Presets</label>
+        <div class="preset-btns">
+          <button data-preset="dots">Dots</button><span class="btn-sep">·</span>
+          <button data-preset="pattern-tight">Pattern Tight</button><span class="btn-sep">·</span>
+          <button data-preset="default">Default</button><span class="btn-sep">·</span>
+          <button data-preset="size-max">Size Max</button><span class="btn-sep">·</span>
+          <button data-preset="shape-max">Shape Max</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="preview" id="viewPreview">
+      <div class="multi-preview">
+        <p class="preview-hint">Each font only reacts to its own axes (size, shap, valu, orie, rota), no single font has all 5.</p>
+        <div class="preview-grid">
+          <div class="preview-cell" data-font="DotSizeVAR">
+            <span class="preview-glyph" data-font="DotSizeVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Dot Size</span>
+          </div>
+          <div class="preview-cell" data-font="DotValueVAR">
+            <span class="preview-glyph" data-font="DotValueVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Dot Value</span>
+          </div>
+          <div class="preview-cell" data-font="DotShapeVAR">
+            <span class="preview-glyph" data-font="DotShapeVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Dot Shape</span>
+          </div>
+          <div class="preview-cell" data-font="DotMultiVAR">
+            <span class="preview-glyph" data-font="DotMultiVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Dot Multi</span>
+          </div>
+          <div class="preview-cell" data-font="DotOrientationVAR">
+            <span class="preview-glyph" data-font="DotOrientationVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Dot Orientation</span>
+          </div>
+          <div class="preview-cell" data-font="DotRotationVAR">
+            <span class="preview-glyph" data-font="DotRotationVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Dot Rotation</span>
+          </div>
+          <div class="preview-cell" data-font="SquareSizeVAR">
+            <span class="preview-glyph" data-font="SquareSizeVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Square Size</span>
+          </div>
+          <div class="preview-cell" data-font="SquareValueVAR">
+            <span class="preview-glyph" data-font="SquareValueVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Square Value</span>
+          </div>
+          <div class="preview-cell" data-font="SquareShapeVAR">
+            <span class="preview-glyph" data-font="SquareShapeVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Square Shape</span>
+          </div>
+          <div class="preview-cell" data-font="SquareMultiVAR">
+            <span class="preview-glyph" data-font="SquareMultiVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Square Multi</span>
+          </div>
+          <div class="preview-cell" data-font="SquareOrientationVAR">
+            <span class="preview-glyph" data-font="SquareOrientationVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Square Orientation</span>
+          </div>
+          <div class="preview-cell" data-font="SquareRotationVAR">
+            <span class="preview-glyph" data-font="SquareRotationVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
+            <span class="preview-label">Square Rotation</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="all-styles hidden" id="viewGrid">
+      <h2>All 62 styles</h2>
+      <div id="allStylesGrid"></div>
+    </section>
+
+    <section class="css-output" id="viewCss">
+      <label>CSS</label>
+      <pre id="cssCode"></pre>
+    </section>
+  </main>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
