@@ -710,6 +710,34 @@ export function initLayout(containerId) {
         reRender();
       });
 
+      document.getElementById('layout-btn-randomize-all')?.addEventListener('click', async () => {
+        const { stageIndices1: s1, stageIndices2: s2 } = createStageIndices('random', numPoints, pointIds);
+        stageIndices1.splice(0, stageIndices1.length, ...s1);
+        stageIndices2.splice(0, stageIndices2.length, ...s2);
+        state.layer1Visible = Math.random() < 0.9;
+        state.layer2Visible = Math.random() < 0.9;
+        if (!state.layer1Visible && !state.layer2Visible) state.layer2Visible = true;
+        state.randomizeStyling = Math.random() < 0.7;
+        state.extremeStyling = state.randomizeStyling && Math.random() < 0.5;
+        if (state.randomizeStyling) state.axesPool = state.extremeStyling ? generateExtremeAxes() : generateRandomAxes();
+        const fontIdx = Math.floor(Math.random() * FONT_NAMES.length);
+        const nextFont = FONT_NAMES[fontIdx];
+        try {
+          await loadFont(nextFont);
+          state.fontName = nextFont;
+        } catch (e) {
+          console.warn('Failed to load font:', nextFont, e);
+        }
+        let idx1 = Math.floor(Math.random() * PALETTE_COLORS.length);
+        let idx2 = Math.floor(Math.random() * PALETTE_COLORS.length);
+        while (PALETTE_COLORS.length > 1 && idx2 === idx1) {
+          idx2 = Math.floor(Math.random() * PALETTE_COLORS.length);
+        }
+        state.logo1Color = PALETTE_COLORS[idx1];
+        state.logo2Color = PALETTE_COLORS[idx2];
+        reRender();
+      });
+
       const resizeHandler = () => {
         requestAnimationFrame(() => {
           scaleLayoutToFit(container);
