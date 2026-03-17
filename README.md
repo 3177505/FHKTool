@@ -5,9 +5,8 @@ Vite + p5.js setup. Hot reload on save, ready for p5 sketches.
 ## Setup
 
 ```bash
-cd Logo/bertin-web
 npm install
-ln -sf ../../_Library/FontFull public/fonts
+ln -sf ../dist/fonts public/fonts
 ```
 
 ## Run (with auto-refresh)
