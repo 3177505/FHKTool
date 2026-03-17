@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  base: '/FHKTool/',
   root: '.',
   publicDir: 'public',
   build: {
