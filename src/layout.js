@@ -43,19 +43,20 @@ const BERTIN_STYLE_AXES = [
   [0, 500, 500, 180, 30]
 ];
 
+const B = import.meta.env.BASE_URL;
 const FONT_FILES = {
-  DotSizeVAR: '/fonts/205TF-Bertin-DotSizeVAR.ttf',
-  DotValueVAR: '/fonts/205TF-Bertin-DotValueVAR.ttf',
-  DotShapeVAR: '/fonts/205TF-Bertin-DotShapeVAR.ttf',
-  DotMultiVAR: '/fonts/205TF-Bertin-DotMultiVAR.ttf',
-  DotOrientationVAR: '/fonts/205TF-Bertin-DotOrientationVAR.ttf',
-  DotRotationVAR: '/fonts/205TF-Bertin-DotRotationVAR.ttf',
-  SquareSizeVAR: '/fonts/205TF-Bertin-SquareSizeVAR.ttf',
-  SquareValueVAR: '/fonts/205TF-Bertin-SquareValueVAR.ttf',
-  SquareShapeVAR: '/fonts/205TF-Bertin-SquareShapeVAR.ttf',
-  SquareMultiVAR: '/fonts/205TF-Bertin-SquareMultiVAR.ttf',
-  SquareOrientationVAR: '/fonts/205TF-Bertin-SquareOrientationVAR.ttf',
-  SquareRotationVAR: '/fonts/205TF-Bertin-SquareRotationVAR.ttf',
+  DotSizeVAR: `${B}fonts/205TF-Bertin-DotSizeVAR.ttf`,
+  DotValueVAR: `${B}fonts/205TF-Bertin-DotValueVAR.ttf`,
+  DotShapeVAR: `${B}fonts/205TF-Bertin-DotShapeVAR.ttf`,
+  DotMultiVAR: `${B}fonts/205TF-Bertin-DotMultiVAR.ttf`,
+  DotOrientationVAR: `${B}fonts/205TF-Bertin-DotOrientationVAR.ttf`,
+  DotRotationVAR: `${B}fonts/205TF-Bertin-DotRotationVAR.ttf`,
+  SquareSizeVAR: `${B}fonts/205TF-Bertin-SquareSizeVAR.ttf`,
+  SquareValueVAR: `${B}fonts/205TF-Bertin-SquareValueVAR.ttf`,
+  SquareShapeVAR: `${B}fonts/205TF-Bertin-SquareShapeVAR.ttf`,
+  SquareMultiVAR: `${B}fonts/205TF-Bertin-SquareMultiVAR.ttf`,
+  SquareOrientationVAR: `${B}fonts/205TF-Bertin-SquareOrientationVAR.ttf`,
+  SquareRotationVAR: `${B}fonts/205TF-Bertin-SquareRotationVAR.ttf`,
 };
 
 const FONT_NAMES = [
@@ -557,7 +558,7 @@ export function initLayout(containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  fetch('/Logo_startD.svg')
+  fetch(`${B}Logo_startD.svg`)
     .then((r) => {
       if (!r.ok) throw new Error(`SVG fetch failed: ${r.status}`);
       return r.text();

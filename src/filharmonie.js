@@ -1,5 +1,6 @@
 import p5 from 'p5';
 
+const B = import.meta.env.BASE_URL;
 const A4_RATIO = 595 / 842;
 const PNG_EXPORT_SCALE = 2;
 const LOGO_SVG_NAMES = ['forum.svg', 'forum1.svg', 'forum2.svg', 'forum3.svg', 'forum4.svg', 'forum5.svg', 'forum6.svg'];
@@ -43,7 +44,7 @@ export function initFilharmonie(containerId) {
   return new p5((sketch) => {
     sketch.preload = () => {
       for (let i = 0; i < LOGO_COUNT; i++) {
-        logos[i] = sketch.loadImage(`/forum/${LOGO_SVG_NAMES[i]}`);
+        logos[i] = sketch.loadImage(`${B}forum/${LOGO_SVG_NAMES[i]}`);
       }
     };
 
@@ -125,7 +126,7 @@ export function initFilharmonie(containerId) {
       logoPathData = [];
       for (let i = 0; i < LOGO_COUNT; i++) {
         try {
-          const res = await fetch(`/forum/${LOGO_SVG_NAMES[i]}`);
+          const res = await fetch(`${B}forum/${LOGO_SVG_NAMES[i]}`);
           const txt = await res.text();
           const parser = new DOMParser();
           const doc = parser.parseFromString(txt, 'image/svg+xml');
