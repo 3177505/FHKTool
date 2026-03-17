@@ -21,7 +21,7 @@ Opens http://localhost:5173 – edits refresh instantly.
 p5 is already installed. Use it like this:
 
 ```js
-import p5 from 'p5';
+import p5 from "p5";
 
 new p5((sketch) => {
   sketch.setup = () => {
@@ -30,9 +30,9 @@ new p5((sketch) => {
   sketch.draw = () => {
     sketch.background(220);
     sketch.textSize(48);
-    sketch.text('Hello', 100, 150);
+    sketch.text("Hello", 100, 150);
   };
-}, document.getElementById('p5-container'));
+}, document.getElementById("p5-container"));
 ```
 
 See `src/p5-example.js` for a Bertin font example.
