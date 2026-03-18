@@ -29,4 +29,14 @@ body.forum-page main {
     height: 100%;
     object-fit: contain;
   }
+
+  &.forum-full-width {
+    aspect-ratio: auto;
+    max-width: none;
+    width: 100%;
+
+    canvas {
+      object-fit: fill;
+    }
+  }
 }

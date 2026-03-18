@@ -40,6 +40,18 @@ export function initForum(containerId) {
   let drawing;
   let stamps = [];
   let lastStampPos = { x: -9999, y: -9999 };
+  let a4Frame = true;
+
+  const getCanvasDimensions = () => {
+    const el = document.getElementById(containerId);
+    const main = el?.closest('main');
+    const h = main ? main.clientHeight : window.innerHeight;
+    const w = main ? main.clientWidth : window.innerWidth;
+    if (a4Frame) {
+      return { w: Math.round(h * A4_RATIO), h };
+    }
+    return { w, h };
+  };
 
   return new p5((sketch) => {
     sketch.preload = () => {
@@ -48,17 +60,33 @@ export function initForum(containerId) {
       }
     };
 
-    const getCanvasHeight = () => {
+    const doResize = () => {
+      const oldW = sketch.width;
+      const oldH = sketch.height;
+      const { w: canvasW, h: canvasH } = getCanvasDimensions();
+      sketch.resizeCanvas(canvasW, canvasH);
+      if (oldW > 0 && oldH > 0 && stamps.length > 0) {
+        const scaleX = canvasW / oldW;
+        const scaleY = canvasH / oldH;
+        stamps = stamps.map(s => ({
+          ...s,
+          x: s.x * scaleX,
+          y: s.y * scaleY
+        }));
+      }
+      drawing = sketch.createGraphics(canvasW, canvasH, sketch.P2D);
+      drawing.background(255);
+      stamps.forEach(s => drawStampAt(drawing, s.x, s.y, s.s, s.logoIdx, s.gradientAngle));
       const el = document.getElementById(containerId);
-      const main = el?.closest('main');
-      return main ? main.clientHeight : window.innerHeight;
+      if (el) el.classList.toggle('forum-full-width', !a4Frame);
     };
 
     sketch.setup = () => {
-      const canvasH = getCanvasHeight();
-      const canvasW = Math.round(canvasH * A4_RATIO);
+      const { w: canvasW, h: canvasH } = getCanvasDimensions();
       const cnv = sketch.createCanvas(canvasW, canvasH, sketch.P2D);
       cnv.parent(containerId);
+      const el = document.getElementById(containerId);
+      if (el) el.classList.toggle('forum-full-width', !a4Frame);
       sketch.smooth(8);
       gradPink = sketch.color(255, 0, 128);
       gradBlue = sketch.color(0, 102, 255);
@@ -77,10 +105,18 @@ export function initForum(containerId) {
         const btnRestart = document.getElementById('forum-btn-restart');
         const btnPng = document.getElementById('forum-btn-png');
         const btnSvg = document.getElementById('forum-btn-svg');
+        const toggleA4 = document.getElementById('forum-toggle-a4');
         const sliderOsc = document.getElementById('forum-slider-osc');
         const sliderGrad = document.getElementById('forum-slider-grad');
         const sliderSize = document.getElementById('forum-slider-size');
 
+        if (toggleA4) {
+          toggleA4.checked = a4Frame;
+          toggleA4.addEventListener('change', () => {
+            a4Frame = !!toggleA4.checked;
+            doResize();
+          });
+        }
         if (btnLogo) btnLogo.addEventListener('click', () => {
           currentLogoIndex = (currentLogoIndex + 1) % LOGO_COUNT;
           oscSpeed = sketch.random(oscSpeedFrom, oscSpeedTo);
@@ -112,14 +148,7 @@ export function initForum(containerId) {
         }
       }
 
-      sketch.windowResized = () => {
-        const canvasH = getCanvasHeight();
-        const canvasW = Math.round(canvasH * A4_RATIO);
-        sketch.resizeCanvas(canvasW, canvasH);
-        drawing = sketch.createGraphics(canvasW, canvasH, sketch.P2D);
-        drawing.background(255);
-        stamps.forEach(s => drawStampAt(drawing, s.x, s.y, s.s, s.logoIdx, s.gradientAngle));
-      };
+      sketch.windowResized = () => doResize();
     };
 
     async function loadLogoPathData() {
