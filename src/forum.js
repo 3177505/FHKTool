@@ -88,12 +88,15 @@ export function initForum(containerId) {
       const el = document.getElementById(containerId);
       if (el) el.classList.toggle('forum-full-width', !a4Frame);
       sketch.smooth(8);
-      const root = document.querySelector('body.forum-page') || document.documentElement;
-      const styles = root ? getComputedStyle(root) : null;
-      const startHex = styles?.getPropertyValue('--forum-gradient-start')?.trim() || '#663399';
-      const endHex = styles?.getPropertyValue('--forum-gradient-end')?.trim() || '#0066cc';
-      gradPink = sketch.color(startHex);
-      gradBlue = sketch.color(endHex);
+      const toColor = (hex) => {
+        const h = String(hex || '').trim();
+        if (/^#?[0-9a-fA-F]{6}$/.test(h)) return sketch.color(h.startsWith('#') ? h : '#' + h);
+        return null;
+      };
+      const color1El = document.getElementById('forum-color-1');
+      const color2El = document.getElementById('forum-color-2');
+      gradPink = toColor(color1El?.value) || sketch.color(255, 0, 128);
+      gradBlue = toColor(color2El?.value) || sketch.color(0, 102, 255);
       oscSpeed = sketch.random(oscSpeedFrom, oscSpeedTo);
       gradientPhaseOffset = sketch.random(sketch.TWO_PI);
       drawing = sketch.createGraphics(canvasW, canvasH, sketch.P2D);
@@ -121,6 +124,16 @@ export function initForum(containerId) {
             doResize();
           });
         }
+        const applyColors = () => {
+          const c1 = toColor(color1El?.value);
+          const c2 = toColor(color2El?.value);
+          if (c1) { gradPink = c1; rebuildLogoIndex = 0; }
+          if (c2) { gradBlue = c2; rebuildLogoIndex = 0; }
+        };
+        if (color1El) color1El.addEventListener('input', applyColors);
+        if (color1El) color1El.addEventListener('change', applyColors);
+        if (color2El) color2El.addEventListener('input', applyColors);
+        if (color2El) color2El.addEventListener('change', applyColors);
         if (btnLogo) btnLogo.addEventListener('click', () => {
           currentLogoIndex = (currentLogoIndex + 1) % LOGO_COUNT;
           oscSpeed = sketch.random(oscSpeedFrom, oscSpeedTo);
