@@ -9,7 +9,7 @@ const GRADIENT_ANGLE_STEPS = 24;
 const DOUBLE_CLICK_MS = 400;
 const DOUBLE_CLICK_PIX = 15;
 
-export function initFilharmonie(containerId) {
+export function initForum(containerId) {
   let logos = [];
   let logoMasks = [];
   let gradMasked = [];
@@ -73,13 +73,13 @@ export function initFilharmonie(containerId) {
       });
 
       function wireControls() {
-        const btnLogo = document.getElementById('filharmonie-btn-logo');
-        const btnRestart = document.getElementById('filharmonie-btn-restart');
-        const btnPng = document.getElementById('filharmonie-btn-png');
-        const btnSvg = document.getElementById('filharmonie-btn-svg');
-        const sliderOsc = document.getElementById('filharmonie-slider-osc');
-        const sliderGrad = document.getElementById('filharmonie-slider-grad');
-        const sliderSize = document.getElementById('filharmonie-slider-size');
+        const btnLogo = document.getElementById('forum-btn-logo');
+        const btnRestart = document.getElementById('forum-btn-restart');
+        const btnPng = document.getElementById('forum-btn-png');
+        const btnSvg = document.getElementById('forum-btn-svg');
+        const sliderOsc = document.getElementById('forum-slider-osc');
+        const sliderGrad = document.getElementById('forum-slider-grad');
+        const sliderSize = document.getElementById('forum-slider-size');
 
         if (btnLogo) btnLogo.addEventListener('click', () => {
           currentLogoIndex = (currentLogoIndex + 1) % LOGO_COUNT;
@@ -302,8 +302,8 @@ export function initFilharmonie(containerId) {
       if (sketch.key === 'p' || sketch.key === 'P') savePng();
       if (sketch.key === 's' || sketch.key === 'S') saveSvg();
 
-      const sliderOsc = document.getElementById('filharmonie-slider-osc');
-      const sliderGrad = document.getElementById('filharmonie-slider-grad');
+      const sliderOsc = document.getElementById('forum-slider-osc');
+      const sliderGrad = document.getElementById('forum-slider-grad');
       if (sliderOsc) sliderOsc.value = Math.round(sketch.map(oscSpeed, 0.001, 1, 1, 100));
       if (sliderGrad) sliderGrad.value = Math.round(gradientCenter * 100);
     };
@@ -466,7 +466,7 @@ export function initFilharmonie(containerId) {
   }, containerId);
 }
 
-const container = document.getElementById('filharmonie-canvas');
+const container = document.getElementById('forum-canvas');
 if (container) {
-  initFilharmonie('filharmonie-canvas');
+  initForum('forum-canvas');
 }

@@ -9,7 +9,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         testing: 'testing.html',
-        filharmonie: 'filharmonie.html',
+        forum: 'forum.html',
       },
     },
   },

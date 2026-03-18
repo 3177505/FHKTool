@@ -1,10 +1,10 @@
 @use 'var' as *;
 
-body.filharmonie-page {
+body.forum-page {
   padding: 0;
 }
 
-body.filharmonie-page main {
+body.forum-page main {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -13,7 +13,7 @@ body.filharmonie-page main {
   overflow: hidden;
 }
 
-#filharmonie-canvas {
+#forum-canvas {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -30,4 +30,3 @@ body.filharmonie-page main {
     object-fit: contain;
   }
 }
-
