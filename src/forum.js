@@ -88,8 +88,12 @@ export function initForum(containerId) {
       const el = document.getElementById(containerId);
       if (el) el.classList.toggle('forum-full-width', !a4Frame);
       sketch.smooth(8);
-      gradPink = sketch.color(255, 0, 128);
-      gradBlue = sketch.color(0, 102, 255);
+      const root = document.querySelector('body.forum-page') || document.documentElement;
+      const styles = root ? getComputedStyle(root) : null;
+      const startHex = styles?.getPropertyValue('--forum-gradient-start')?.trim() || '#663399';
+      const endHex = styles?.getPropertyValue('--forum-gradient-end')?.trim() || '#0066cc';
+      gradPink = sketch.color(startHex);
+      gradBlue = sketch.color(endHex);
       oscSpeed = sketch.random(oscSpeedFrom, oscSpeedTo);
       gradientPhaseOffset = sketch.random(sketch.TWO_PI);
       drawing = sketch.createGraphics(canvasW, canvasH, sketch.P2D);
