@@ -4,6 +4,19 @@ body.forum-page {
   padding: 0;
 }
 
+.forum-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.forum-palette {
+  margin-top: 0;
+  margin-left: auto;
+}
+
 body.forum-page main {
   flex: 1;
   min-height: 0;

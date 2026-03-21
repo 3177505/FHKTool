@@ -4,6 +4,11 @@
   box-sizing: border-box;
 }
 
+p, h1, h2, h3, h4, h5, h6, label, span {
+  margin: 0;
+  padding: 0;
+}
+
 html {
   height: 100vh;
   overflow: hidden;
@@ -33,7 +38,8 @@ select {
   background: none;
   border: none;
   border-bottom: 1px solid $color-primary;
-  padding: 0.15rem 0;
+  margin: 0;
+  padding: 0;
   cursor: pointer;
 }
 
@@ -53,6 +59,7 @@ a {
 button {
   background: none;
   border: none;
+  margin: 0;
   padding: 0;
   font: inherit;
   color: $color-primary;
@@ -66,6 +73,18 @@ button {
   &.active {
     color: $color-visited;
   }
+}
+
+.export-popup {
+  position: fixed;
+  bottom: $spacing-md;
+  right: $spacing-md;
+  display: flex;
+  gap: $spacing-sm;
+  padding: $spacing-sm $spacing-md;
+  border: 1px solid $color-border;
+  background: $color-bg;
+  z-index: 10;
 }
 
 .top-right {
@@ -232,7 +251,7 @@ main {
 }
 
 .btn-sep {
-  margin: 0 $spacing-xs;
+  margin: 0;
   color: $color-primary;
 }
 
@@ -240,10 +259,10 @@ main {
   margin-bottom: $spacing-sm;
 
   button {
-    margin-right: 0;
+    margin: 0;
   }
 }
 
 .preset-btns .btn-sep {
-  margin: 0 $spacing-xs;
+  margin: 0;
 }

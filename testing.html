@@ -1,41 +1,41 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="cs">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bertin Variable Font Explorer – Testing</title>
+  <title>Bertin Variable Font Explorer – Testování</title>
   <link rel="preload" href="fonts/205TF-Bertin-DotSizeVAR.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="/src/style.scss">
 </head>
 <body class="testing-page">
   <header>
-    <h1>Testing</h1>
-    <p><a href="index.html">Logo Layout</a> · <a href="testing.html">Testing</a> · <a href="forum.html">Forum</a></p>
+    <h1>Testování</h1>
+    <p><a href="index.html">Rozložení loga</a> · <a href="testing.html">Testování</a> · <a href="forum.html">Forum</a></p>
   </header>
 
   <div class="top-right">
     <div class="preview-random" id="previewRandom">
       <span class="preview-glyph" id="previewRandomGlyph" data-font="">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
       <span class="preview-random-label" id="previewRandomLabel">—</span>
-      <button type="button" id="previewRandomBtn">Randomize</button>
+      <button type="button" id="previewRandomBtn">Náhodně</button>
     </div>
   </div>
 
   <main>
     <div class="overview" id="axisOverview">
-      Size → size only · Value → valu only · Shape → size, shap · Multi → shap, valu · Orientation → size, shap, orie · Rotation → size, shap, rota
+      Size → jen size · Value → jen valu · Shape → size, shap · Multi → shap, valu · Orientation → size, shap, orie · Rotation → size, shap, rota
     </div>
 
     <div class="view-tabs">
-      <button class="view-toggle active" data-view="controls">Sliders</button><span class="btn-sep">·</span>
-      <button class="view-toggle" data-view="grid">All 62 styles</button>
+      <button class="view-toggle active" data-view="controls">Posuvníky</button><span class="btn-sep">·</span>
+      <button class="view-toggle" data-view="grid">Všech 62 stylů</button>
     </div>
 
     <section class="controls" id="viewControls">
       <div class="control-group">
-        <label>Stylistic Set</label>
+        <label>Stylistická sada</label>
         <select id="ssSelect">
-          <option value="">Default</option>
+          <option value="">Výchozí</option>
           <option value="ss04" selected>ss04 Pattern</option>
         </select>
       </div>
@@ -62,11 +62,11 @@
       </div>
 
       <div class="control-group presets">
-        <label>Presets</label>
+        <label>Předvolby</label>
         <div class="preset-btns">
           <button data-preset="dots">Dots</button><span class="btn-sep">·</span>
           <button data-preset="pattern-tight">Pattern Tight</button><span class="btn-sep">·</span>
-          <button data-preset="default">Default</button><span class="btn-sep">·</span>
+          <button data-preset="default">Výchozí</button><span class="btn-sep">·</span>
           <button data-preset="size-max">Size Max</button><span class="btn-sep">·</span>
           <button data-preset="shape-max">Shape Max</button>
         </div>
@@ -75,7 +75,7 @@
 
     <section class="preview" id="viewPreview">
       <div class="multi-preview">
-        <p class="preview-hint">Each font only reacts to its own axes (size, shap, valu, orie, rota), no single font has all 5.</p>
+        <p class="preview-hint">Každý font reaguje jen na své vlastní osy (size, shap, valu, orie, rota), žádný font nemá všech 5.</p>
         <div class="preview-grid">
           <div class="preview-cell" data-font="DotSizeVAR">
             <span class="preview-glyph" data-font="DotSizeVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
@@ -87,7 +87,7 @@
           </div>
           <div class="preview-cell" data-font="DotShapeVAR">
             <span class="preview-glyph" data-font="DotShapeVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
-            <span class="preview-label">Dot Shape</span>
+            <span class="preview-label">Tvar tečky</span>
           </div>
           <div class="preview-cell" data-font="DotMultiVAR">
             <span class="preview-glyph" data-font="DotMultiVAR">ABC<span class="char-d">D</span>E<span class="char-d">F</span>GHI</span>
@@ -130,7 +130,7 @@
     </section>
 
     <section class="all-styles hidden" id="viewGrid">
-      <h2>All 62 styles</h2>
+      <h2>Všech 62 stylů</h2>
       <div id="allStylesGrid"></div>
     </section>
 

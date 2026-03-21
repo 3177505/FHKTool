@@ -1,18 +1,31 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="cs">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bertin Logo Layout</title>
+  <title>Bertin Logo – Rozložení</title>
   <link rel="preload" href="fonts/205TF-Bertin-DotSizeVAR.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="/src/style.scss">
 </head>
 <body class="layout-page">
   <header class="layout-header">
-    <p><a href="index.html">Logo Layout</a> · <a href="testing.html">Testing</a> · <a href="forum.html">Forum</a></p>
+    <div class="layout-header-row">
+      <p><a href="index.html">Rozložení loga</a> · <a href="testing.html">Testování</a> · <a href="forum.html">Forum</a></p>
+      <div class="layout-palette layout-palette-topright">
+        <span class="layout-palette-label">Vrstva 1</span>
+        <div class="layout-palette-swatch" id="layout-layer1-swatch"></div>
+        <span class="layout-palette-label">Vrstva 2</span>
+        <div class="layout-palette-swatch" id="layout-layer2-swatch"></div>
+        <span class="layout-palette-sep">|</span>
+        <span class="layout-palette-label">Paleta</span>
+        <div class="layout-palette-swatches" id="layout-palette-swatches"></div>
+        <button type="button" id="layout-btn-save-palette">Uložit paletu</button>
+        <button type="button" id="layout-btn-reset-palette">Obnovit</button>
+      </div>
+    </div>
     <div class="layout-poster-inputs">
-      <label><input type="text" id="poster-letter" value="S" maxlength="1" /> Letter</label>
-      <label><input type="text" id="poster-number" value="1" maxlength="1" /> Number</label>
+      <label><input type="text" id="poster-letter" value="S" maxlength="1" /> Písmeno</label>
+      <label><input type="text" id="poster-number" value="1" maxlength="1" /> Číslo</label>
     </div>
   </header> 
 
@@ -21,18 +34,23 @@
     <div id="poster-canvas"></div>
   </main>
 
+  <div class="export-popup">
+    <button type="button" id="layout-btn-convert">Krok 1: Převést na tvary</button>
+    <button type="button" id="layout-btn-png" disabled>Exportovat PNG</button>
+    <button type="button" id="layout-btn-svg" disabled>Exportovat SVG</button>
+  </div>
   <footer class="layout-footer">
     <p class="layout-footer-buttons">
-      <button type="button" id="layout-btn-unify">Unify</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-symmetrical">Symmetrical</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-layer1">Layer 1</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-layer2">Layer 2</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-unify">Sjednotit</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-symmetrical">Symetrické</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-layer1">Vrstva 1</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-layer2">Vrstva 2</button><span class="btn-sep">·</span>
       <!-- <button type="button" id="layout-btn-cutout">Cutout</button><span class="btn-sep">·</span> -->
-      <button type="button" id="layout-btn-randomize">Randomize styling</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-extreme">Randomize extreme</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-typeface">Change typeface</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-colors">Randomize colors</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-randomize-all">Randomize all</button>
+      <button type="button" id="layout-btn-randomize">Náhodný styl</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-extreme">Náhodná extrémní</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-typeface">Změnit řez</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-colors">Náhodné barvy</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-randomize-all">Náhodně vše</button>
     </p>
     <div class="layout-css-row">
       <div class="layout-css-col">

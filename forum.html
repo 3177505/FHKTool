@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="cs">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,27 +7,35 @@
   <link rel="stylesheet" href="/src/style.scss">
 </head>
 <body class="forum-page">
-  <header>
-    <p><a href="index.html">Logo Layout</a> · <a href="testing.html">Testing</a> · <a href="forum.html">Forum</a></p>
+  <header class="forum-header">
+    <p><a href="index.html">Rozložení loga</a> · <a href="testing.html">Testování</a> · <a href="forum.html">Forum</a></p>
+    <div class="forum-palette layout-palette">
+      <span class="layout-palette-label">Barva 1</span>
+      <div class="layout-palette-swatch" id="forum-color1-swatch"></div>
+      <span class="layout-palette-label">Barva 2</span>
+      <div class="layout-palette-swatch" id="forum-color2-swatch"></div>
+      <button type="button" id="forum-btn-save-palette">Uložit paletu</button>
+      <button type="button" id="forum-btn-reset-palette">Obnovit</button>
+    </div>
   </header>
   <main>
     <div id="forum-canvas"></div>
   </main>
-  <footter>
-    <p>Double-click point A, then click point B → even row of stamps. Space: change logo | R: restart | P: PNG | S: SVG | Arrows ↑↓: oscillation speed | Arrows ←→: gradient center</p>
+  <div class="export-popup">
+    <button type="button" id="forum-btn-png">Exportovat PNG</button>
+    <button type="button" id="forum-btn-svg">Exportovat SVG</button>
+  </div>
+  <footer>
+    <p>Dvojklik bod A, pak klik bod B → rovnoměrná řada razítek. Mezerník: změna loga | R: restart | P: PNG | S: SVG | Šipky ↑↓: rychlost oscilace | Šipky ←→: střed přechodu</p>
     <div class="forum-controls">
-      <label class="forum-toggle-a4"><input type="checkbox" id="forum-toggle-a4" checked> A4 frame</label>
-      <button type="button" id="forum-btn-logo">Change logo</button>
-      <button type="button" id="forum-btn-restart">Restart</button>
-      <button type="button" id="forum-btn-png">PNG</button>
-      <button type="button" id="forum-btn-svg">SVG</button>
-      <label>Color 1 <input type="text" id="forum-color-1" value="#ff0080" placeholder="#ff0080"></label>
-      <label>Color 2 <input type="text" id="forum-color-2" value="#0066ff" placeholder="#0066ff"></label>
-      <label>Oscillation speed <input type="range" id="forum-slider-osc" min="1" max="100" value="20"></label>
-      <label>Gradient center <input type="range" id="forum-slider-grad" min="10" max="90" value="50"></label>
-      <label>Size <input type="range" id="forum-slider-size" min="50" max="200" value="100"></label>
+      <label class="forum-toggle-a4"><input type="checkbox" id="forum-toggle-a4" checked> Rám A4</label>
+      <button type="button" id="forum-btn-logo">Změnit logo</button>
+      <button type="button" id="forum-btn-restart">Restartovat</button>
+      <label>Rychlost oscilace <input type="range" id="forum-slider-osc" min="1" max="100" value="20"></label>
+      <label>Střed přechodu <input type="range" id="forum-slider-grad" min="10" max="90" value="50"></label>
+      <label>Velikost <input type="range" id="forum-slider-size" min="50" max="200" value="100"></label>
     </div>
-  </footter>
+  </footer>
   <script type="module" src="/src/forum.js"></script>
 </body>
 </html>

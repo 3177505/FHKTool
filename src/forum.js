@@ -2,6 +2,30 @@ import p5 from 'p5';
 
 const B = import.meta.env.BASE_URL;
 const A4_RATIO = 595 / 842;
+const FORUM_PALETTE_STORAGE_KEY = 'forum-palette';
+const FORUM_DEFAULT_COLOR1 = '#ff0080';
+const FORUM_DEFAULT_COLOR2 = '#0066ff';
+
+function loadForumPaletteFromStorage() {
+  try {
+    const raw = localStorage.getItem(FORUM_PALETTE_STORAGE_KEY);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || arr.length !== 2 || typeof arr[0] !== 'string' || typeof arr[1] !== 'string') return null;
+    if (!/^#?[0-9a-fA-F]{6}$/.test(arr[0].replace('#', '')) || !/^#?[0-9a-fA-F]{6}$/.test(arr[1].replace('#', ''))) return null;
+    return [arr[0].startsWith('#') ? arr[0] : '#' + arr[0], arr[1].startsWith('#') ? arr[1] : '#' + arr[1]];
+  } catch {
+    return null;
+  }
+}
+
+function saveForumPaletteToStorage(hex1, hex2) {
+  try {
+    localStorage.setItem(FORUM_PALETTE_STORAGE_KEY, JSON.stringify([hex1, hex2]));
+  } catch (e) {
+    console.warn('Failed to save forum palette:', e);
+  }
+}
 const PNG_EXPORT_SCALE = 2;
 const LOGO_SVG_NAMES = ['forum.svg', 'forum1.svg', 'forum2.svg', 'forum3.svg', 'forum4.svg', 'forum5.svg', 'forum6.svg'];
 const LOGO_COUNT = 7;
@@ -93,10 +117,11 @@ export function initForum(containerId) {
         if (/^#?[0-9a-fA-F]{6}$/.test(h)) return sketch.color(h.startsWith('#') ? h : '#' + h);
         return null;
       };
-      const color1El = document.getElementById('forum-color-1');
-      const color2El = document.getElementById('forum-color-2');
-      gradPink = toColor(color1El?.value) || sketch.color(255, 0, 128);
-      gradBlue = toColor(color2El?.value) || sketch.color(0, 102, 255);
+      const saved = loadForumPaletteFromStorage();
+      const hex1 = saved ? saved[0] : FORUM_DEFAULT_COLOR1;
+      const hex2 = saved ? saved[1] : FORUM_DEFAULT_COLOR2;
+      gradPink = toColor(hex1) || sketch.color(255, 0, 128);
+      gradBlue = toColor(hex2) || sketch.color(0, 102, 255);
       oscSpeed = sketch.random(oscSpeedFrom, oscSpeedTo);
       gradientPhaseOffset = sketch.random(sketch.TWO_PI);
       drawing = sketch.createGraphics(canvasW, canvasH, sketch.P2D);
@@ -124,16 +149,56 @@ export function initForum(containerId) {
             doResize();
           });
         }
-        const applyColors = () => {
-          const c1 = toColor(color1El?.value);
-          const c2 = toColor(color2El?.value);
-          if (c1) { gradPink = c1; rebuildLogoIndex = 0; }
-          if (c2) { gradBlue = c2; rebuildLogoIndex = 0; }
-        };
-        if (color1El) color1El.addEventListener('input', applyColors);
-        if (color1El) color1El.addEventListener('change', applyColors);
-        if (color2El) color2El.addEventListener('input', applyColors);
-        if (color2El) color2El.addEventListener('change', applyColors);
+        function p5ColorToHex(c) {
+          return '#' + sketch.hex(sketch.red(c), 2) + sketch.hex(sketch.green(c), 2) + sketch.hex(sketch.blue(c), 2);
+        }
+        function buildForumSwatch(containerId, getColor, setColor) {
+          const container = document.getElementById(containerId);
+          if (!container) return;
+          const update = () => {
+            const hex = p5ColorToHex(getColor());
+            colorInput.value = hex;
+            hexInput.value = hex;
+          };
+          container.innerHTML = '';
+          const colorInput = document.createElement('input');
+          colorInput.type = 'color';
+          colorInput.value = p5ColorToHex(getColor());
+          const hexInput = document.createElement('input');
+          hexInput.type = 'text';
+          hexInput.value = p5ColorToHex(getColor());
+          hexInput.placeholder = '#000000';
+          hexInput.maxLength = 7;
+          const syncFromColor = () => {
+            const c = toColor(colorInput.value);
+            if (c) { setColor(c); hexInput.value = colorInput.value; rebuildLogoIndex = 0; }
+          };
+          const syncFromHex = () => {
+            const c = toColor(hexInput.value);
+            if (c) { setColor(c); colorInput.value = p5ColorToHex(c); rebuildLogoIndex = 0; }
+          };
+          colorInput.addEventListener('input', syncFromColor);
+          colorInput.addEventListener('change', syncFromColor);
+          hexInput.addEventListener('change', syncFromHex);
+          hexInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') syncFromHex(); });
+          container.appendChild(colorInput);
+          container.appendChild(hexInput);
+          return update;
+        }
+        buildForumSwatch('forum-color1-swatch', () => gradPink, (c) => { gradPink = c; })();
+        buildForumSwatch('forum-color2-swatch', () => gradBlue, (c) => { gradBlue = c; })();
+        document.getElementById('forum-btn-save-palette')?.addEventListener('click', () => {
+          saveForumPaletteToStorage(p5ColorToHex(gradPink), p5ColorToHex(gradBlue));
+          const btn = document.getElementById('forum-btn-save-palette');
+          if (btn) { const orig = btn.textContent; btn.textContent = 'Uloženo!'; setTimeout(() => { btn.textContent = orig; }, 1500); }
+        });
+        document.getElementById('forum-btn-reset-palette')?.addEventListener('click', () => {
+          gradPink = toColor(FORUM_DEFAULT_COLOR1) || sketch.color(255, 0, 128);
+          gradBlue = toColor(FORUM_DEFAULT_COLOR2) || sketch.color(0, 102, 255);
+          rebuildLogoIndex = 0;
+          buildForumSwatch('forum-color1-swatch', () => gradPink, (c) => { gradPink = c; })();
+          buildForumSwatch('forum-color2-swatch', () => gradBlue, (c) => { gradBlue = c; })();
+        });
         if (btnLogo) btnLogo.addEventListener('click', () => {
           currentLogoIndex = (currentLogoIndex + 1) % LOGO_COUNT;
           oscSpeed = sketch.random(oscSpeedFrom, oscSpeedTo);
