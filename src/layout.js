@@ -81,6 +81,7 @@ const BERTIN_STYLE_AXES = [
 ];
 
 import * as fontkit from 'fontkit';
+import { applyCutoutToSvg } from './cutout.js';
 
 const B = import.meta.env.BASE_URL;
 
@@ -705,9 +706,20 @@ function svgToPngBlob(svgString, width, height) {
   });
 }
 
-async function saveLayoutAndPosterPng(shapes) {
-  if (!shapes) return;
+function canvasToBlob(canvas) {
+  return new Promise((resolve) => canvas.toBlob(resolve));
+}
+
+async function saveLayoutAndPosterPng(shapes, cutoutResult) {
   const ts = layoutTimestamp();
+  if (cutoutResult) {
+    const layoutBlob = await canvasToBlob(cutoutResult.layoutCanvas);
+    const posterBlob = await canvasToBlob(cutoutResult.posterCanvas);
+    if (layoutBlob) downloadBlob(layoutBlob, `layout_${ts}.png`);
+    if (posterBlob) downloadBlob(posterBlob, `poster_${ts}.png`);
+    return;
+  }
+  if (!shapes) return;
   const layoutBlob = await svgToPngBlob(shapes.layoutSvg, CANVAS_W, CANVAS_H);
   const posterBlob = await svgToPngBlob(shapes.posterSvg, POSTER_W, POSTER_H);
   if (layoutBlob) downloadBlob(layoutBlob, `layout_${ts}.png`);
@@ -750,6 +762,8 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
 
   let layer1Paths = '';
   let layer2Paths = '';
+  const debugBefore = [];
+  const debugAfter = [];
 
   for (let i = 0; i < numPoints; i++) {
     const stage1 = stageIndices1[i] % NUM_STAGES;
@@ -771,11 +785,40 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
     const offsetY = isDAtL3R3 ? cellHeight * D_OFFSET_Y : 0;
     const posY = screenY[i] + offsetY;
 
+    debugBefore.push({
+      i,
+      pointId,
+      char,
+      screenX: screenX[i],
+      screenY: screenY[i],
+      offsetY,
+      posY,
+      translateY: offsetY > 0 ? `calc(-50% + ${offsetY}px)` : '-50%',
+      fitScale1,
+      fitScale2,
+      w1,
+      h1,
+      w2,
+      h2
+    });
+
     const c1 = `rgb(${logo1Color[0]},${logo1Color[1]},${logo1Color[2]})`;
     const c2 = `rgb(${logo2Color[0]},${logo2Color[1]},${logo2Color[2]})`;
 
     const glyph1 = getGlyphPathFromFontKit(font, char, FONT_SIZE_LOAD, axes1, true);
     const glyph2 = getGlyphPathFromFontKit(font, char, FONT_SIZE_LOAD, axes2, true);
+
+    debugAfter.push({
+      i,
+      pointId,
+      char,
+      svgPosX: screenX[i],
+      svgPosY: posY,
+      fitScale1,
+      fitScale2,
+      glyph1: glyph1 ? { cx: glyph1.cx, cy: glyph1.cy, width: glyph1.width, height: glyph1.height } : null,
+      glyph2: glyph2 ? { cx: glyph2.cx, cy: glyph2.cy, width: glyph2.width, height: glyph2.height } : null
+    });
 
     if (layer1Visible && glyph1) {
       const tr = `translate(${screenX[i]},${posY}) scale(${fitScale1}) scale(1,-1) translate(${-glyph1.cx},${-glyph1.cy})`;
@@ -787,10 +830,17 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
     }
   }
 
+  const debugData = { debugBefore, debugAfter, CANVAS_W, CANVAS_H, availCellW, availCellH, cellHeight };
+  console.log('[Layout conversion DEBUG] BEFORE (HTML render values):', debugBefore);
+  console.log('[Layout conversion DEBUG] AFTER (SVG export values):', debugAfter);
+  console.log('[Layout conversion DEBUG] Canvas size:', { CANVAS_W, CANVAS_H });
+  console.log('[Layout conversion DEBUG] State geometry:', { availCellW, availCellH, cellHeight });
+  if (typeof window !== 'undefined') window.__layoutConversionDebug = debugData;
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CANVAS_W}" height="${CANVAS_H}" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="#ffffff"/>
-<g transform="scale(1,-1) translate(0,-${CANVAS_H})">
+<g id="layout-content">
 <g id="layer1">\n${layer1Paths}</g>
 <g id="layer2" style="mix-blend-mode:multiply">\n${layer2Paths}</g>
 </g>
@@ -798,12 +848,15 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
 }
 
 function convertPosterToShapes(font, state, stageIndices1, stageIndices2, posterLetter, posterNumber) {
-  const { logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const { fontName, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const feature = state.fontFeatureSettings || '"ss04" 1';
 
   const stage1 = stageIndices1[0] % NUM_STAGES;
   const stage2 = stageIndices2[0] % NUM_STAGES;
   const axes1 = getAxesForStage(state, stage1);
   const axes2 = getAxesForStage(state, stage2);
+  const variation1 = getVariationString(axes1);
+  const variation2 = getVariationString(axes2);
 
   const letter = String(posterLetter || 'S').charAt(0);
   const number = String(posterNumber || '1').charAt(0);
@@ -813,12 +866,14 @@ function convertPosterToShapes(font, state, stageIndices1, stageIndices2, poster
   const centerX = POSTER_W / 2;
   const centerY = POSTER_H / 2;
 
+  const { w: w1, h: h1 } = measureGlyph(letter, fontName, variation1, feature);
+  const { w: w2, h: h2 } = measureGlyph(number, fontName, variation2, feature);
+  const maxW = Math.max(w1, w2);
+  const maxH = Math.max(h1, h2);
+  const fitScale = Math.min(availW / maxW, availH / maxH) * (FONT_SIZE_LOAD / POSTER_FONT_SIZE);
+
   const glyph1 = getGlyphPathFromFontKit(font, letter, POSTER_FONT_SIZE, axes1, true);
   const glyph2 = getGlyphPathFromFontKit(font, number, POSTER_FONT_SIZE, axes2, true);
-
-  const maxW = Math.max(glyph1?.width ?? 0, glyph2?.width ?? 0, 1);
-  const maxH = Math.max(glyph1?.height ?? 0, glyph2?.height ?? 0, 1);
-  const fitScale = Math.min(availW / maxW, availH / maxH);
 
   const c1 = `rgb(${logo1Color[0]},${logo1Color[1]},${logo1Color[2]})`;
   const c2 = `rgb(${logo2Color[0]},${logo2Color[1]},${logo2Color[2]})`;
@@ -836,7 +891,7 @@ function convertPosterToShapes(font, state, stageIndices1, stageIndices2, poster
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${POSTER_W}" height="${POSTER_H}" xmlns="http://www.w3.org/2000/svg">
+<svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="#ffffff"/>
 <g id="layer1">\n${layer1Paths}</g>
 <g id="layer2" style="mix-blend-mode:multiply">\n${layer2Paths}</g>
@@ -864,7 +919,7 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer) {
     layoutEl.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.className = 'layout-wrapper layout-shapes-view';
-    wrap.style.cssText = `width:${CANVAS_W}px;height:${CANVAS_H}px; background:#fff; max-width:100%; max-height:100%;`;
+    wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff; max-width: 100%; max-height: 100%;`;
     wrap.innerHTML = svgPart(layoutSvg);
     layoutEl.appendChild(wrap);
     scaleLayoutToFit(layoutContainer);
@@ -873,8 +928,39 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer) {
     posterEl.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.className = 'poster-wrapper poster-shapes-view';
-    wrap.style.cssText = `width:${POSTER_W}px;height:${POSTER_H}px; background:#fff;`;
+    wrap.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: #fff;`;
     wrap.innerHTML = svgPart(posterSvg);
+    posterEl.appendChild(wrap);
+    scalePosterToFit(posterEl);
+  }
+}
+
+function displayCutoutAsCanvas(layoutCanvas, posterCanvas, layoutContainer) {
+  const layoutEl = document.getElementById('layout-canvas');
+  const posterEl = document.getElementById('poster-canvas');
+  if (layoutEl && layoutContainer) {
+    layoutEl.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'layout-wrapper layout-cutout-view';
+    wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff;`;
+    const img = document.createElement('img');
+    img.src = layoutCanvas.toDataURL('image/png');
+    img.alt = '';
+    img.style.cssText = 'display: block; width: 100%; height: 100%; object-fit: contain;';
+    wrap.appendChild(img);
+    layoutEl.appendChild(wrap);
+    scaleLayoutToFit(layoutContainer);
+  }
+  if (posterEl) {
+    posterEl.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'poster-wrapper poster-cutout-view';
+    wrap.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: #fff;`;
+    const img = document.createElement('img');
+    img.src = posterCanvas.toDataURL('image/png');
+    img.alt = '';
+    img.style.cssText = 'display: block; width: 100%; height: 100%; object-fit: contain;';
+    wrap.appendChild(img);
     posterEl.appendChild(wrap);
     scalePosterToFit(posterEl);
   }
@@ -928,6 +1014,15 @@ export function initLayout(containerId) {
         screenY[i] = layoutOffsetY + svgPositions[i][1] * layoutScale;
       }
 
+      console.log('[Layout init DEBUG] Position computation:', {
+        svgPositions: svgPositions.map((p, i) => ({ i, pointId: pointIds[i], raw: p })),
+        layoutScale,
+        layoutOffsetX,
+        layoutOffsetY,
+        screenX: [...screenX],
+        screenY: [...screenY]
+      });
+
       const cols = Math.max(4, Math.ceil(Math.sqrt(numPoints)));
       const rows = Math.ceil(numPoints / cols);
       const cellWidth = (svgWidth / cols) * layoutScale;
@@ -976,6 +1071,7 @@ export function initLayout(containerId) {
       });
 
       let convertedShapes = null;
+      let cutoutResult = null;
 
       const setExportEnabled = (enabled) => {
         const png = document.getElementById('layout-btn-png');
@@ -986,6 +1082,7 @@ export function initLayout(containerId) {
 
       const reRender = () => {
         convertedShapes = null;
+        cutoutResult = null;
         setExportEnabled(false);
         if (state.randomizeStyling) state.axesPool = state.extremeStyling ? generateExtremeAxes() : generateRandomAxes();
         renderLayout(state, stageIndices1, stageIndices2);
@@ -1120,7 +1217,7 @@ export function initLayout(containerId) {
         }
       });
 
-      document.getElementById('layout-btn-png')?.addEventListener('click', () => saveLayoutAndPosterPng(convertedShapes));
+      document.getElementById('layout-btn-png')?.addEventListener('click', () => saveLayoutAndPosterPng(convertedShapes, cutoutResult));
       document.getElementById('layout-btn-svg')?.addEventListener('click', () => saveLayoutAndPosterSvg(convertedShapes));
       document.getElementById('layout-btn-unify')?.addEventListener('click', () => updateMode('unify'));
       document.getElementById('layout-btn-symmetrical')?.addEventListener('click', () => updateMode('symmetrical'));
@@ -1135,9 +1232,26 @@ export function initLayout(containerId) {
         reRender();
       });
 
-      document.getElementById('layout-btn-cutout')?.addEventListener('click', () => {
-        state.useCutout = !state.useCutout;
-        reRender();
+      document.getElementById('layout-btn-cutout')?.addEventListener('click', async () => {
+        const btn = document.getElementById('layout-btn-cutout');
+        if (btn) btn.disabled = true;
+        try {
+          const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+          if (!shapes) return;
+          convertedShapes = shapes;
+          displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container);
+          setExportEnabled(true);
+          const layoutCanvas = await applyCutoutToSvg(shapes.layoutSvg, CANVAS_W, CANVAS_H);
+          const posterCanvas = await applyCutoutToSvg(shapes.posterSvg, POSTER_W, POSTER_H);
+          if (layoutCanvas && posterCanvas) {
+            cutoutResult = { layoutCanvas, posterCanvas };
+            displayCutoutAsCanvas(layoutCanvas, posterCanvas, container);
+          }
+        } catch (e) {
+          console.error('Cutout failed:', e);
+        } finally {
+          if (btn) btn.disabled = false;
+        }
       });
 
       document.getElementById('layout-btn-randomize')?.addEventListener('click', () => {
