@@ -79,7 +79,6 @@ const BERTIN_STYLE_AXES = [
 ];
 
 import * as fontkit from 'fontkit';
-import { applyCutoutToSvg } from './cutout.js';
 
 const B = import.meta.env.BASE_URL;
 
@@ -425,6 +424,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
   const wrapper = document.createElement('div');
   wrapper.className = 'layout-wrapper';
   wrapper.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff;`;
+  if (state.invert) wrapper.style.filter = 'invert(1)';
 
   const renderLayoutDebug = [];
 
@@ -513,23 +513,68 @@ function renderLayout(state, stageIndices1, stageIndices2) {
   scaleLayoutToFit(container);
 
   requestAnimationFrame(() => {
-    const actualPositions = [];
+    const wr = wrapper.getBoundingClientRect();
+    const scaleX = wr.width / CANVAS_W;
+    const scaleY = wr.height / CANVAS_H;
+    const spanDebug = [];
     layer1.querySelectorAll('[data-debug-idx]').forEach((span) => {
+      const i = parseInt(span.dataset.debugIdx, 10);
+      const set = renderLayoutDebug[i];
       const r = span.getBoundingClientRect();
-      const wr = wrapper.getBoundingClientRect();
-      actualPositions.push({
-        i: parseInt(span.dataset.debugIdx, 10),
-        clientRect: { x: r.x, y: r.y, width: r.width, height: r.height },
-        relativeToWrapper: { x: r.x - wr.x, y: r.y - wr.y }
-      });
+      const setLeft = parseFloat(span.style.left) || 0;
+      const setTop = parseFloat(span.style.top) || 0;
+      const relX = r.x - wr.x;
+      const relY = r.y - wr.y;
+      const centerX = (relX + r.width / 2) / scaleX;
+      const centerY = (relY + r.height / 2) / scaleY;
+      const expectedCenterX = setLeft;
+      const expectedCenterY = (set?.effectiveCenterY ?? setTop);
+      const diffX = centerX - expectedCenterX;
+      const diffY = centerY - expectedCenterY;
+      const row = {
+        i,
+        pointId: set?.pointId,
+        char: set?.char,
+        set: { left: setLeft, top: setTop },
+        expectedCenter: { x: expectedCenterX, y: expectedCenterY },
+        actualCenter: { x: centerX, y: centerY },
+        diff: { x: diffX, y: diffY },
+        width: r.width,
+        height: r.height
+      };
+      spanDebug.push(row);
     });
-    const beforeAfter = {
-      renderLayout: renderLayoutDebug,
-      actualDomPositions: actualPositions
+    console.log('[Span position debug] Wrapper scale:', { scaleX, scaleY }, 'Canvas:', CANVAS_W, 'x', CANVAS_H);
+    console.log('[Span position debug] Expected center vs actual center (in canvas space) per span:', spanDebug);
+    console.table(spanDebug.map((r) => ({
+      i: r.i,
+      pointId: r.pointId,
+      'exp.centerX': r.expectedCenter.x.toFixed(1),
+      'exp.centerY': r.expectedCenter.y.toFixed(1),
+      'act.centerX': r.actualCenter.x.toFixed(1),
+      'act.centerY': r.actualCenter.y.toFixed(1),
+      'diff.x': r.diff.x.toFixed(1),
+      'diff.y': r.diff.y.toFixed(1)
+    })));
+    const layoutCanvas = container.getBoundingClientRect();
+    const wrapperComputed = window.getComputedStyle(wrapper);
+    const firstSpan = layer1.querySelector('[data-debug-idx="0"]');
+    const firstSpanRect = firstSpan ? firstSpan.getBoundingClientRect() : null;
+    const layoutContext = {
+      view: 'font',
+      layoutCanvas: { x: layoutCanvas.x, y: layoutCanvas.y, width: layoutCanvas.width, height: layoutCanvas.height },
+      wrapper: { x: wr.x, y: wr.y, width: wr.width, height: wr.height, transform: wrapperComputed.transform },
+      wrapperOffsetFromCanvas: { top: wr.y - layoutCanvas.y, left: wr.x - layoutCanvas.x },
+      scale: { scaleX, scaleY },
+      firstElement: firstSpanRect ? {
+        viewport: { x: firstSpanRect.x, y: firstSpanRect.y },
+        fromCanvasTop: firstSpanRect.y - layoutCanvas.y,
+        fromWrapperTop: firstSpanRect.y - wr.y,
+        centerFromCanvasTop: (firstSpanRect.y - layoutCanvas.y + firstSpanRect.height / 2)
+      } : null
     };
-    console.log('[Layout BEFORE - HTML render] Position calculation:', renderLayoutDebug);
-    console.log('[Layout BEFORE - Actual DOM] getBoundingClientRect after paint:', actualPositions);
-    if (typeof window !== 'undefined') window.__layoutRenderDebug = beforeAfter;
+    console.log('[Layout context - FONT view]', layoutContext);
+    if (typeof window !== 'undefined') window.__spanPositionDebug = { spanDebug, wrapperRect: wr, scaleX, scaleY, renderLayoutDebug, layoutContext };
   });
 }
 
@@ -581,6 +626,7 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
   const wrapper = document.createElement('div');
   wrapper.className = 'poster-wrapper';
   wrapper.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: #fff;`;
+  if (state.invert) wrapper.style.filter = 'invert(1)';
 
   const layer1 = document.createElement('div');
   layer1.className = 'poster-layer1';
@@ -745,16 +791,9 @@ function canvasToBlob(canvas) {
   return new Promise((resolve) => canvas.toBlob(resolve));
 }
 
-async function saveLayoutAndPosterPng(shapes, cutoutResult) {
-  const ts = layoutTimestamp();
-  if (cutoutResult) {
-    const layoutBlob = await canvasToBlob(cutoutResult.layoutCanvas);
-    const posterBlob = await canvasToBlob(cutoutResult.posterCanvas);
-    if (layoutBlob) downloadBlob(layoutBlob, `layout_${ts}.png`);
-    if (posterBlob) downloadBlob(posterBlob, `poster_${ts}.png`);
-    return;
-  }
+async function saveLayoutAndPosterPng(shapes) {
   if (!shapes) return;
+  const ts = layoutTimestamp();
   const layoutBlob = await svgToPngBlob(shapes.layoutSvg, CANVAS_W, CANVAS_H);
   const posterBlob = await svgToPngBlob(shapes.posterSvg, POSTER_W, POSTER_H);
   if (layoutBlob) downloadBlob(layoutBlob, `layout_${ts}.png`);
@@ -858,11 +897,11 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
 
     if (layer1Visible && glyph1) {
       const tr = `translate(${screenX[i]},${posY}) scale(${fitScale1}) scale(1,-1) translate(${-glyph1.cx},${-glyph1.cy})`;
-      layer1Paths += `  <path d="${escapeXmlAttr(glyph1.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
+      layer1Paths += `  <path data-idx="${i}" d="${escapeXmlAttr(glyph1.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
     }
     if (layer2Visible && glyph2) {
       const tr = `translate(${screenX[i]},${posY}) scale(${fitScale2}) scale(1,-1) translate(${-glyph2.cx},${-glyph2.cy})`;
-      layer2Paths += `  <path d="${escapeXmlAttr(glyph2.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
+      layer2Paths += `  <path data-idx="${i}" d="${escapeXmlAttr(glyph2.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
     }
   }
 
@@ -884,6 +923,27 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
     }
   }
 
+  const useCutout = state.cutout && layer1Paths && layer2Paths;
+  if (useCutout) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<defs>
+  <g id="layout-layer1">\n${layer1Paths}</g>
+  <g id="layout-layer2">\n${layer2Paths}</g>
+  <filter id="layout-cutout" x="-10%" y="-10%" width="120%" height="120%">
+    <feImage xlink:href="#layout-layer1" result="l1"/>
+    <feImage xlink:href="#layout-layer2" result="l2"/>
+    <feComposite in="l1" in2="l2" operator="in" result="overlap"/>
+    <feFlood flood-color="white" result="white"/>
+    <feComposite in="white" in2="overlap" operator="in" result="whiteOverlap"/>
+    <feBlend in="l1" in2="l2" mode="normal" result="combined"/>
+    <feComposite in="whiteOverlap" in2="combined" operator="over" result="final"/>
+  </filter>
+</defs>
+<rect width="100%" height="100%" fill="none" filter="url(#layout-cutout)"/>
+</svg>`;
+  }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="#ffffff"/>
@@ -937,6 +997,27 @@ function convertPosterToShapes(font, state, stageIndices1, stageIndices2, poster
     layer2Paths = `  <path d="${escapeXmlAttr(glyph2.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
   }
 
+  const useCutout = state.cutout && layer1Paths && layer2Paths;
+  if (useCutout) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<defs>
+  <g id="poster-layer1">\n${layer1Paths}</g>
+  <g id="poster-layer2">\n${layer2Paths}</g>
+  <filter id="poster-cutout" x="-10%" y="-10%" width="120%" height="120%">
+    <feImage xlink:href="#poster-layer1" result="l1"/>
+    <feImage xlink:href="#poster-layer2" result="l2"/>
+    <feComposite in="l1" in2="l2" operator="in" result="overlap"/>
+    <feFlood flood-color="white" result="white"/>
+    <feComposite in="white" in2="overlap" operator="in" result="whiteOverlap"/>
+    <feBlend in="l1" in2="l2" mode="normal" result="combined"/>
+    <feComposite in="whiteOverlap" in2="combined" operator="over" result="final"/>
+  </filter>
+</defs>
+<rect width="100%" height="100%" fill="none" filter="url(#poster-cutout)"/>
+</svg>`;
+  }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="#ffffff"/>
@@ -955,7 +1036,8 @@ async function convertToShapes(state, stageIndices1, stageIndices2, getPosterInp
   return { layoutSvg, posterSvg };
 }
 
-function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer) {
+function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {}) {
+  const { invert = false, cutout = false } = options;
   const layoutEl = document.getElementById('layout-canvas');
   const posterEl = document.getElementById('poster-canvas');
   const svgPart = (s) => {
@@ -963,51 +1045,117 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer) {
     return i >= 0 ? s.substring(i) : s;
   };
   if (layoutEl && layoutContainer) {
-    layoutEl.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.className = 'layout-wrapper layout-shapes-view';
+    let wrap = layoutEl.querySelector('.layout-wrapper');
+    const savedTransform = wrap ? window.getComputedStyle(wrap).transform : null;
+    const savedTransformOrigin = wrap ? window.getComputedStyle(wrap).transformOrigin : null;
+    if (!wrap) {
+      wrap = document.createElement('div');
+      layoutEl.appendChild(wrap);
+    }
+    wrap.className = cutout ? 'layout-wrapper layout-cutout-view' : 'layout-wrapper layout-shapes-view';
     wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff;`;
+    if (invert) wrap.style.filter = 'invert(1)';
     wrap.innerHTML = svgPart(layoutSvg);
-    layoutEl.appendChild(wrap);
-    scaleLayoutToFit(layoutContainer);
+    if (savedTransform && savedTransform !== 'none') {
+      wrap.style.transform = savedTransform;
+      wrap.style.transformOrigin = savedTransformOrigin || 'center center';
+    } else {
+      scaleLayoutToFit(layoutContainer);
+    }
+    requestAnimationFrame(() => {
+      if (!savedTransform || savedTransform === 'none') scaleLayoutToFit(layoutContainer);
+      const wr = wrap.getBoundingClientRect();
+      const scaleX = wr.width / CANVAS_W;
+      const scaleY = wr.height / CANVAS_H;
+      const svgEl = wrap.querySelector('svg');
+      const paths = svgEl ? Array.from(svgEl.querySelectorAll('#layer1 path')).sort((a, b) => parseInt(a.getAttribute('data-idx') || '0', 10) - parseInt(b.getAttribute('data-idx') || '0', 10)) : [];
+      const exportData = window.__layoutConversionDebug?.after || [];
+      const svgDebug = paths.map((path) => {
+        const i = parseInt(path.getAttribute('data-idx') || '-1', 10);
+        const exp = exportData[i];
+        const tr = path.getAttribute('transform') || '';
+        const m = tr.match(/translate\(([^,]+),([^)]+)\)/);
+        const posX = m ? parseFloat(m[1]) : 0;
+        const posY = m ? parseFloat(m[2]) : 0;
+        const r = path.getBoundingClientRect();
+        const centerX = (r.x - wr.x + r.width / 2) / scaleX;
+        const centerY = (r.y - wr.y + r.height / 2) / scaleY;
+        const diffX = exp ? centerX - exp.svgPosX : 0;
+        const diffY = exp ? centerY - exp.svgPosY : 0;
+        return {
+          i,
+          pointId: exp?.pointId,
+          expected: { x: posX, y: posY },
+          actualCenter: { x: centerX, y: centerY },
+          diff: { x: diffX, y: diffY }
+        };
+      });
+      const layoutCanvas = layoutContainer.getBoundingClientRect();
+      const wrapperComputed = window.getComputedStyle(wrap);
+      const firstPath = paths[0];
+      const firstPathRect = firstPath ? firstPath.getBoundingClientRect() : null;
+      const layoutContext = {
+        view: 'svg',
+        layoutCanvas: { x: layoutCanvas.x, y: layoutCanvas.y, width: layoutCanvas.width, height: layoutCanvas.height },
+        wrapper: { x: wr.x, y: wr.y, width: wr.width, height: wr.height, transform: wrapperComputed.transform },
+        wrapperOffsetFromCanvas: { top: wr.y - layoutCanvas.y, left: wr.x - layoutCanvas.x },
+        scale: { scaleX, scaleY },
+        firstElement: firstPathRect ? {
+          viewport: { x: firstPathRect.x, y: firstPathRect.y },
+          fromCanvasTop: firstPathRect.y - layoutCanvas.y,
+          fromWrapperTop: firstPathRect.y - wr.y,
+          centerFromCanvasTop: (firstPathRect.y - layoutCanvas.y + firstPathRect.height / 2)
+        } : null
+      };
+      console.log('[Layout context - SVG view]', layoutContext);
+      const fontCtx = window.__spanPositionDebug?.layoutContext;
+      if (fontCtx) {
+        const comparison = {
+          layoutCanvasSize: {
+            font: `${fontCtx.layoutCanvas.width.toFixed(0)}x${fontCtx.layoutCanvas.height.toFixed(0)}`,
+            svg: `${layoutContext.layoutCanvas.width.toFixed(0)}x${layoutContext.layoutCanvas.height.toFixed(0)}`,
+            same: Math.abs(fontCtx.layoutCanvas.width - layoutContext.layoutCanvas.width) < 1
+          },
+          wrapperSize: {
+            font: `${fontCtx.wrapper.width.toFixed(0)}x${fontCtx.wrapper.height.toFixed(0)}`,
+            svg: `${layoutContext.wrapper.width.toFixed(0)}x${layoutContext.wrapper.height.toFixed(0)}`
+          },
+          wrapperOffset: {
+            font: `top:${fontCtx.wrapperOffsetFromCanvas.top.toFixed(0)} left:${fontCtx.wrapperOffsetFromCanvas.left.toFixed(0)}`,
+            svg: `top:${layoutContext.wrapperOffsetFromCanvas.top.toFixed(0)} left:${layoutContext.wrapperOffsetFromCanvas.left.toFixed(0)}`
+          },
+          firstElementFromCanvasTop: {
+            font: fontCtx.firstElement?.centerFromCanvasTop.toFixed(1),
+            svg: layoutContext.firstElement?.centerFromCanvasTop.toFixed(1),
+            diff: fontCtx.firstElement && layoutContext.firstElement
+              ? (layoutContext.firstElement.centerFromCanvasTop - fontCtx.firstElement.centerFromCanvasTop).toFixed(1)
+              : 'n/a'
+          }
+        };
+        console.log('[Layout JUMP analysis] Font vs SVG comparison:', comparison);
+      }
+      console.log('[Layout SVG shapes debug] Wrapper:', { width: wr.width, height: wr.height }, 'scale:', { scaleX, scaleY });
+      console.log('[Layout SVG shapes debug] Paths expected vs actual:', svgDebug);
+      console.table(svgDebug.map((r) => ({
+        i: r.i,
+        pointId: r.pointId,
+        'exp.x': r.expected.x.toFixed(1),
+        'exp.y': r.expected.y.toFixed(1),
+        'act.x': r.actualCenter.x.toFixed(1),
+        'act.y': r.actualCenter.y.toFixed(1),
+        'diff.x': r.diff.x.toFixed(2),
+        'diff.y': r.diff.y.toFixed(2)
+      })));
+      if (typeof window !== 'undefined') window.__layoutSvgShapesDebug = { svgDebug, wrapperRect: wr, scaleX, scaleY, layoutContext };
+    });
   }
   if (posterEl) {
     posterEl.innerHTML = '';
     const wrap = document.createElement('div');
-    wrap.className = 'poster-wrapper poster-shapes-view';
+    wrap.className = cutout ? 'poster-wrapper poster-cutout-view' : 'poster-wrapper poster-shapes-view';
     wrap.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: #fff;`;
+    if (invert) wrap.style.filter = 'invert(1)';
     wrap.innerHTML = svgPart(posterSvg);
-    posterEl.appendChild(wrap);
-    scalePosterToFit(posterEl);
-  }
-}
-
-function displayCutoutAsCanvas(layoutCanvas, posterCanvas, layoutContainer) {
-  const layoutEl = document.getElementById('layout-canvas');
-  const posterEl = document.getElementById('poster-canvas');
-  if (layoutEl && layoutContainer) {
-    layoutEl.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.className = 'layout-wrapper layout-cutout-view';
-    wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff;`;
-    const img = document.createElement('img');
-    img.src = layoutCanvas.toDataURL('image/png');
-    img.alt = '';
-    img.style.cssText = 'display: block; width: 100%; height: 100%; object-fit: contain;';
-    wrap.appendChild(img);
-    layoutEl.appendChild(wrap);
-    scaleLayoutToFit(layoutContainer);
-  }
-  if (posterEl) {
-    posterEl.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.className = 'poster-wrapper poster-cutout-view';
-    wrap.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: #fff;`;
-    const img = document.createElement('img');
-    img.src = posterCanvas.toDataURL('image/png');
-    img.alt = '';
-    img.style.cssText = 'display: block; width: 100%; height: 100%; object-fit: contain;';
-    wrap.appendChild(img);
     posterEl.appendChild(wrap);
     scalePosterToFit(posterEl);
   }
@@ -1108,6 +1256,8 @@ export function initLayout(containerId) {
         layer1Visible: true,
         layer2Visible: true,
         useCutout: false,
+        cutout: false,
+        invert: false,
         randomizeStyling: false,
         extremeStyling: false,
         axesPool: [],
@@ -1120,7 +1270,6 @@ export function initLayout(containerId) {
       });
 
       let convertedShapes = null;
-      let cutoutResult = null;
 
       const setExportEnabled = (enabled) => {
         const png = document.getElementById('layout-btn-png');
@@ -1131,7 +1280,6 @@ export function initLayout(containerId) {
 
       const reRender = () => {
         convertedShapes = null;
-        cutoutResult = null;
         setExportEnabled(false);
         if (state.randomizeStyling) state.axesPool = state.extremeStyling ? generateExtremeAxes() : generateRandomAxes();
         renderLayout(state, stageIndices1, stageIndices2);
@@ -1256,7 +1404,7 @@ export function initLayout(containerId) {
           const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
           if (shapes) {
             convertedShapes = shapes;
-            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container);
+            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { invert: state.invert, cutout: state.cutout });
             setExportEnabled(true);
           }
         } catch (e) {
@@ -1266,7 +1414,7 @@ export function initLayout(containerId) {
         }
       });
 
-      document.getElementById('layout-btn-png')?.addEventListener('click', () => saveLayoutAndPosterPng(convertedShapes, cutoutResult));
+      document.getElementById('layout-btn-png')?.addEventListener('click', () => saveLayoutAndPosterPng(convertedShapes));
       document.getElementById('layout-btn-svg')?.addEventListener('click', () => saveLayoutAndPosterSvg(convertedShapes));
       document.getElementById('layout-btn-unify')?.addEventListener('click', () => updateMode('unify'));
       document.getElementById('layout-btn-symmetrical')?.addEventListener('click', () => updateMode('symmetrical'));
@@ -1284,22 +1432,28 @@ export function initLayout(containerId) {
       document.getElementById('layout-btn-cutout')?.addEventListener('click', async () => {
         const btn = document.getElementById('layout-btn-cutout');
         if (btn) btn.disabled = true;
+        state.cutout = !state.cutout;
         try {
           const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
-          if (!shapes) return;
-          convertedShapes = shapes;
-          displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container);
-          setExportEnabled(true);
-          const layoutCanvas = await applyCutoutToSvg(shapes.layoutSvg, CANVAS_W, CANVAS_H);
-          const posterCanvas = await applyCutoutToSvg(shapes.posterSvg, POSTER_W, POSTER_H);
-          if (layoutCanvas && posterCanvas) {
-            cutoutResult = { layoutCanvas, posterCanvas };
-            displayCutoutAsCanvas(layoutCanvas, posterCanvas, container);
+          if (shapes) {
+            convertedShapes = shapes;
+            setExportEnabled(true);
+            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { invert: state.invert, cutout: state.cutout });
           }
-        } catch (e) {
-          console.error('Cutout failed:', e);
         } finally {
           if (btn) btn.disabled = false;
+        }
+      });
+
+      document.getElementById('layout-btn-invert')?.addEventListener('click', () => {
+        state.invert = !state.invert;
+        if (convertedShapes) {
+          displayShapesAsSvg(convertedShapes.layoutSvg, convertedShapes.posterSvg, container, { invert: state.invert, cutout: state.cutout });
+        } else {
+          const layoutWrap = document.querySelector('#layout-canvas .layout-wrapper');
+          const posterWrap = document.querySelector('#poster-canvas .poster-wrapper');
+          if (layoutWrap) layoutWrap.style.filter = state.invert ? 'invert(1)' : '';
+          if (posterWrap) posterWrap.style.filter = state.invert ? 'invert(1)' : '';
         }
       });
 
