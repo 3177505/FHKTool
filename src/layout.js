@@ -3,8 +3,6 @@ const CANVAS_H = 1080;
 const POSTER_W = 595;
 const POSTER_H = 842;
 const LAYOUT_MARGIN = 48;
-const LAYOUT_OFFSET_Y_UP = 220;
-const LAYOUT_OFFSET_X_LEFT = 100;
 const BOTTOM_MARGIN = 48;
 const CELL_PADDING = 4;
 const FONT_SIZE_LOAD = 200;
@@ -426,7 +424,9 @@ function renderLayout(state, stageIndices1, stageIndices2) {
 
   const wrapper = document.createElement('div');
   wrapper.className = 'layout-wrapper';
-  wrapper.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff; max-width: 100%; max-height: 100%;`;
+  wrapper.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff;`;
+
+  const renderLayoutDebug = [];
 
   const layer1 = document.createElement('div');
   layer1.className = 'layout-layer1';
@@ -455,8 +455,22 @@ function renderLayout(state, stageIndices1, stageIndices2) {
     const offsetY = isDAtL3R3 ? cellHeight * D_OFFSET_Y : 0;
     const translateY = offsetY > 0 ? `calc(-50% + ${offsetY}px)` : '-50%';
 
+    renderLayoutDebug.push({
+      i,
+      pointId,
+      char,
+      left: screenX[i],
+      top: screenY[i],
+      offsetY,
+      effectiveCenterY: screenY[i] + offsetY,
+      translateY,
+      fitScale1,
+      fitScale2
+    });
+
     const span1 = document.createElement('span');
     span1.textContent = char;
+    span1.dataset.debugIdx = String(i);
     span1.style.cssText = `
       position: absolute;
       left: ${screenX[i]}px;
@@ -475,6 +489,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
 
     const span2 = document.createElement('span');
     span2.textContent = char;
+    span2.dataset.debugIdx = String(i);
     span2.style.cssText = `
       position: absolute;
       left: ${screenX[i]}px;
@@ -496,6 +511,26 @@ function renderLayout(state, stageIndices1, stageIndices2) {
   wrapper.appendChild(layer2);
   container.appendChild(wrapper);
   scaleLayoutToFit(container);
+
+  requestAnimationFrame(() => {
+    const actualPositions = [];
+    layer1.querySelectorAll('[data-debug-idx]').forEach((span) => {
+      const r = span.getBoundingClientRect();
+      const wr = wrapper.getBoundingClientRect();
+      actualPositions.push({
+        i: parseInt(span.dataset.debugIdx, 10),
+        clientRect: { x: r.x, y: r.y, width: r.width, height: r.height },
+        relativeToWrapper: { x: r.x - wr.x, y: r.y - wr.y }
+      });
+    });
+    const beforeAfter = {
+      renderLayout: renderLayoutDebug,
+      actualDomPositions: actualPositions
+    };
+    console.log('[Layout BEFORE - HTML render] Position calculation:', renderLayoutDebug);
+    console.log('[Layout BEFORE - Actual DOM] getBoundingClientRect after paint:', actualPositions);
+    if (typeof window !== 'undefined') window.__layoutRenderDebug = beforeAfter;
+  });
 }
 
 function scaleLayoutToFit(container) {
@@ -745,11 +780,12 @@ function getGlyphPathFromFontKit(font, char, fontSize, axes, useSS04) {
     const scaledPath = glyph.getScaledPath(fontSize);
     const pathData = scaledPath.toSVG();
     if (!pathData || pathData.trim() === '') return null;
-    const bbox = scaledPath.cbox;
-    const cx = (bbox.minX + bbox.maxX) / 2;
-    const cy = (bbox.minY + bbox.maxY) / 2;
-    const width = bbox.maxX - bbox.minX;
-    const height = bbox.maxY - bbox.minY;
+    const box = scaledPath.bbox || scaledPath.cbox;
+    if (!box) return null;
+    const cx = (box.minX + box.maxX) / 2;
+    const cy = (box.minY + box.maxY) / 2;
+    const width = box.maxX - box.minX;
+    const height = box.maxY - box.minY;
     return { pathData, cx, cy, width, height };
   } catch {
     return null;
@@ -830,15 +866,26 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
     }
   }
 
-  const debugData = { debugBefore, debugAfter, CANVAS_W, CANVAS_H, availCellW, availCellH, cellHeight };
-  console.log('[Layout conversion DEBUG] BEFORE (HTML render values):', debugBefore);
-  console.log('[Layout conversion DEBUG] AFTER (SVG export values):', debugAfter);
-  console.log('[Layout conversion DEBUG] Canvas size:', { CANVAS_W, CANVAS_H });
-  console.log('[Layout conversion DEBUG] State geometry:', { availCellW, availCellH, cellHeight });
-  if (typeof window !== 'undefined') window.__layoutConversionDebug = debugData;
+  const debugData = {
+    before: debugBefore,
+    after: debugAfter,
+    canvas: { CANVAS_W, CANVAS_H },
+    geometry: { availCellW, availCellH, cellHeight }
+  };
+  console.log('[Layout AFTER - SVG export] Position calculation:', debugAfter);
+  console.log('[Layout conversion] Canvas:', debugData.canvas, 'Geometry:', debugData.geometry);
+  if (typeof window !== 'undefined') {
+    window.__layoutConversionDebug = debugData;
+    if (window.__layoutRenderDebug) {
+      console.log('[Layout COMPARISON] Render vs Export:', {
+        render: window.__layoutRenderDebug.renderLayout,
+        export: debugAfter
+      });
+    }
+  }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${CANVAS_W}" height="${CANVAS_H}" xmlns="http://www.w3.org/2000/svg">
+<svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="#ffffff"/>
 <g id="layout-content">
 <g id="layer1">\n${layer1Paths}</g>
@@ -919,7 +966,7 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer) {
     layoutEl.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.className = 'layout-wrapper layout-shapes-view';
-    wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff; max-width: 100%; max-height: 100%;`;
+    wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff;`;
     wrap.innerHTML = svgPart(layoutSvg);
     layoutEl.appendChild(wrap);
     scaleLayoutToFit(layoutContainer);
@@ -1004,8 +1051,8 @@ export function initLayout(containerId) {
       const layoutScale = Math.min(availW / svgWidth, availH / svgHeight);
       const scaledW = svgWidth * layoutScale;
       const scaledH = svgHeight * layoutScale;
-      const layoutOffsetX = LAYOUT_MARGIN + (availW - scaledW) / 2 - LAYOUT_OFFSET_X_LEFT;
-      const layoutOffsetY = LAYOUT_MARGIN + (availH - scaledH) / 2 - LAYOUT_OFFSET_Y_UP;
+      const layoutOffsetX = LAYOUT_MARGIN + (availW - scaledW) / 2;
+      const layoutOffsetY = LAYOUT_MARGIN + (availH - scaledH) / 2;
 
       const screenX = new Array(numPoints);
       const screenY = new Array(numPoints);
@@ -1014,14 +1061,16 @@ export function initLayout(containerId) {
         screenY[i] = layoutOffsetY + svgPositions[i][1] * layoutScale;
       }
 
-      console.log('[Layout init DEBUG] Position computation:', {
+      const initDebug = {
         svgPositions: svgPositions.map((p, i) => ({ i, pointId: pointIds[i], raw: p })),
         layoutScale,
         layoutOffsetX,
         layoutOffsetY,
         screenX: [...screenX],
         screenY: [...screenY]
-      });
+      };
+      console.log('[Layout init] Position computation (svg→screen):', initDebug);
+      if (typeof window !== 'undefined') window.__layoutInitDebug = initDebug;
 
       const cols = Math.max(4, Math.ceil(Math.sqrt(numPoints)));
       const rows = Math.ceil(numPoints / cols);
