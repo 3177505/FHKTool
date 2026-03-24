@@ -12,6 +12,7 @@ p, h1, h2, h3, h4, h5, h6, label, span {
 html {
   height: 100vh;
   overflow: hidden;
+  font-size: 70%;
 }
 
 body {
@@ -79,12 +80,29 @@ button {
   position: fixed;
   bottom: $spacing-md;
   right: $spacing-md;
-  display: flex;
-  gap: $spacing-sm;
+  margin: 0;
   padding: $spacing-sm $spacing-md;
+  list-style: none;
   border: 1px solid $color-border;
   background: $color-bg;
   z-index: 10;
+
+  li {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li + li {
+    margin-top: $spacing-sm;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    pointer-events: none;
+    opacity: 0.45;
+    text-decoration: none;
+  }
 }
 
 .top-right {
@@ -127,7 +145,7 @@ button {
 }
 
 .companion-glyph {
-  font-size: 120px;
+  font-size: 84px;
   line-height: 1;
   color: $color-text;
 }

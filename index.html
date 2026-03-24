@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Datatype:wght@100..900&display=swap" rel="stylesheet">
   <title>Bertin Logo – Rozložení</title>
   <link rel="preload" href="fonts/205TF-Bertin-DotSizeVAR.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="/src/style.scss">
@@ -11,21 +14,41 @@
   <header class="layout-header">
     <div class="layout-header-row">
       <p><a href="index.html">Rozložení loga</a> · <a href="testing.html">Testování</a> · <a href="forum.html">Forum</a></p>
-      <div class="layout-palette layout-palette-topright">
-        <span class="layout-palette-label">Vrstva 1</span>
-        <div class="layout-palette-swatch" id="layout-layer1-swatch"></div>
-        <span class="layout-palette-label">Vrstva 2</span>
-        <div class="layout-palette-swatch" id="layout-layer2-swatch"></div>
-        <span class="layout-palette-sep">|</span>
-        <span class="layout-palette-label">Paleta</span>
-        <div class="layout-palette-swatches" id="layout-palette-swatches"></div>
-        <button type="button" id="layout-btn-save-palette">Uložit paletu</button>
-        <button type="button" id="layout-btn-reset-palette">Obnovit</button>
+      <div class="layout-palette layout-palette-topright layout-palette-panel">
+        <ul class="layout-palette-list">
+          <li class="layout-palette-line">
+            <span class="layout-palette-label">Vrstva 1</span>
+            <div class="layout-palette-swatch" id="layout-layer1-swatch"></div>
+          </li>
+          <li class="layout-palette-line">
+            <span class="layout-palette-label">Vrstva 2</span>
+            <div class="layout-palette-swatch" id="layout-layer2-swatch"></div>
+          </li>
+          <li class="layout-palette-line">
+            <span class="layout-palette-label">Paleta</span>
+            <div class="layout-palette-swatches" id="layout-palette-swatches"></div>
+          </li>
+          <li class="layout-palette-line layout-palette-line--buttons">
+            <button type="button" id="layout-btn-save-palette">Uložit paletu</button>
+            <button type="button" id="layout-btn-reset-palette">Obnovit</button>
+          </li>
+          <li class="layout-palette-line">
+            <span class="layout-palette-label">Pozadí plátna</span>
+            <div class="layout-palette-swatch" id="layout-canvas-bg-swatch"></div>
+          </li>
+        </ul>
       </div>
     </div>
     <div class="layout-poster-inputs">
       <label><input type="text" id="poster-letter" value="S" maxlength="1" /> Písmeno</label>
       <label><input type="text" id="poster-number" value="1" maxlength="1" /> Číslo</label>
+      <label><select id="poster-feature">
+        <option value="normal" selected>Bertin (základní)</option>
+        <option value="ss01">ss01</option>
+        <option value="ss02">ss02</option>
+        <option value="ss03">ss03</option>
+        <option value="ss04">ss04</option>
+      </select> Stylistické sady</label>
     </div>
   </header> 
 
@@ -34,22 +57,25 @@
     <div id="poster-canvas"></div>
   </main>
 
-  <div class="export-popup">
-    <button type="button" id="layout-btn-convert">Krok 1: Převést na tvary</button>
-    <button type="button" id="layout-btn-png" disabled>Exportovat PNG</button>
-    <button type="button" id="layout-btn-svg" disabled>Exportovat SVG</button>
-  </div>
+  <ul class="export-popup">
+    <li><button type="button" id="layout-btn-convert">Krok 1: Převést na tvary</button></li>
+    <li><button type="button" id="layout-btn-png" disabled>Exportovat PNG</button></li>
+    <li><span class="layout-export-krok2">Krok 2:</span> <button type="button" id="layout-btn-svg" disabled>Exportovat SVG</button></li>
+  </ul>
   <footer class="layout-footer">
     <p class="layout-footer-buttons">
       <button type="button" id="layout-btn-unify">Sjednotit</button><span class="btn-sep">·</span>
       <button type="button" id="layout-btn-symmetrical">Symetrické</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-unify-cuts">Sjednotit rezy</button><span class="btn-sep">·</span>
       <button type="button" id="layout-btn-layer1">Vrstva 1</button><span class="btn-sep">·</span>
       <button type="button" id="layout-btn-layer2">Vrstva 2</button><span class="btn-sep">·</span>
       <button type="button" id="layout-btn-cutout">Výřez</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-invert">Invert</button><span class="btn-sep">·</span>
       <button type="button" id="layout-btn-randomize">Náhodný styl</button><span class="btn-sep">·</span>
       <button type="button" id="layout-btn-extreme">Náhodná extrémní</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-typeface">Změnit řez</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-orientation-axes">Orientace tečka + čtverec</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-typeface">Změnit řez Vrstva 1+2</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-typeface-1">Změnit řez Vrstva 1</button><span class="btn-sep">·</span>
+      <button type="button" id="layout-btn-typeface-2">Změnit řez Vrstva 2</button><span class="btn-sep">·</span>
       <button type="button" id="layout-btn-colors">Náhodné barvy</button><span class="btn-sep">·</span>
       <button type="button" id="layout-btn-randomize-all">Náhodně vše</button>
     </p>

@@ -4,7 +4,10 @@ $color-border: #ccc;
 $color-bg: #fff;
 $color-text: #000;
 
-$font-family: system-ui, sans-serif;
+$color-page-bg: #2e2e2e;
+$color-page-text: #e8e8e8;
+
+$font-family: 'Datatype', system-ui, sans-serif;
 $font-size-base: 1rem;
 
 $spacing-xs: 0.25rem;
@@ -13,9 +16,9 @@ $spacing-md: 1rem;
 $spacing-lg: 1.5rem;
 $spacing-xl: 1.25rem;
 
-$preview-glyph-size: 140px;
-$preview-glyph-size-max: 12vh;
-$preview-random-size: 300px;
-$preview-random-size-max: 25vh;
-$grid-glyph-size: 48px;
-$grid-glyph-size-max: 5vh;
+$preview-glyph-size: 98px;
+$preview-glyph-size-max: 8.4vh;
+$preview-random-size: 210px;
+$preview-random-size-max: 17.5vh;
+$grid-glyph-size: 34px;
+$grid-glyph-size-max: 3.5vh;

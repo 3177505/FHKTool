@@ -2,6 +2,8 @@
 
 body.layout-page {
   padding: 0;
+  background: $color-page-bg;
+  color: $color-page-text;
 }
 
 .layout-header {
@@ -23,6 +25,53 @@ body.layout-page {
 .layout-palette-topright {
   margin-left: auto;
   margin-top: 0;
+}
+
+body.layout-page .layout-palette-panel.layout-palette {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 0;
+  max-width: 100%;
+}
+body.layout-page .layout-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  column-gap: $spacing-md;
+  row-gap: $spacing-xs;
+  max-width: 100%;
+}
+body.layout-page .layout-palette-line {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: $spacing-xs;
+  .layout-palette-label {
+    margin: 0;
+  }
+  &--buttons {
+    gap: $spacing-sm;
+    button {
+      margin: 0;
+    }
+  }
+}
+body.layout-page .layout-palette-panel .layout-palette-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-xs;
+}
+body.layout-page .layout-palette-panel .layout-palette-swatches .layout-palette-swatch {
+  display: inline-flex;
+  margin: 0;
 }
 
 .layout-poster-inputs {
@@ -139,7 +188,7 @@ body.layout-page main.layout-main-two {
   align-items: center;
   overflow: hidden;
   border: 1px solid $color-primary;
-  
+  background: $color-bg;
 
   .layout-wrapper,
   .poster-wrapper {
@@ -172,7 +221,6 @@ body.layout-page main.layout-main-two {
   max-height: 100%;
 
   .poster-wrapper {
-    background: $color-bg;
     position: relative;
     transform-origin: center center;
   }

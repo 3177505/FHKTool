@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Datatype:wght@100..900&display=swap" rel="stylesheet">
   <title>Forum – Follow Cursor</title>
   <link rel="stylesheet" href="/src/style.scss">
 </head>
@@ -21,10 +24,10 @@
   <main>
     <div id="forum-canvas"></div>
   </main>
-  <div class="export-popup">
-    <button type="button" id="forum-btn-png">Exportovat PNG</button>
-    <button type="button" id="forum-btn-svg">Exportovat SVG</button>
-  </div>
+  <ul class="export-popup">
+    <li><button type="button" id="forum-btn-png">Exportovat PNG</button></li>
+    <li><button type="button" id="forum-btn-svg">Exportovat SVG</button></li>
+  </ul>
   <footer>
     <p>Dvojklik bod A, pak klik bod B → rovnoměrná řada razítek. Mezerník: změna loga | R: restart | P: PNG | S: SVG | Šipky ↑↓: rychlost oscilace | Šipky ←→: střed přechodu</p>
     <div class="forum-controls">

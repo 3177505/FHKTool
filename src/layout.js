@@ -30,6 +30,36 @@ const PALETTE_COLORS = [
 ];
 
 const PALETTE_STORAGE_KEY = 'layout-palette';
+const CANVAS_BG_STORAGE_KEY = 'layout-canvas-bg';
+
+function normalizedCanvasBgHex(hex) {
+  const rgb = hexToRgb(hex);
+  return rgb ? rgbToHex(rgb[0], rgb[1], rgb[2]) : '#ffffff';
+}
+
+function loadCanvasBgFromStorage() {
+  try {
+    const raw = localStorage.getItem(CANVAS_BG_STORAGE_KEY);
+    if (!raw) return null;
+    return normalizedCanvasBgHex(raw);
+  } catch {
+    return null;
+  }
+}
+
+function saveCanvasBgToStorage(hex) {
+  try {
+    localStorage.setItem(CANVAS_BG_STORAGE_KEY, hex);
+  } catch (e) {
+    console.warn('Failed to save canvas bg:', e);
+  }
+}
+
+function syncCanvasChromeBg(state) {
+  const bg = normalizedCanvasBgHex(state.canvasBg);
+  document.getElementById('layout-canvas')?.style.setProperty('background', bg);
+  document.getElementById('poster-canvas')?.style.setProperty('background', bg);
+}
 
 function rgbToHex(r, g, b) {
   return '#' + [r, g, b].map(x => Math.round(x).toString(16).padStart(2, '0')).join('');
@@ -67,15 +97,15 @@ function savePaletteToStorage(palette) {
 }
 
 const BERTIN_STYLE_AXES = [
-  [0, 500, 500, 0, 30],
-  [1000, 1000, 500, 0, 180],
-  [500, 500, 500, 0, 30],
-  [1000, 500, 500, 0, 30],
-  [500, 1000, 500, 0, 30],
-  [500, 500, 1000, 0, 30],
-  [1000, 1000, 500, 0, 180],
-  [0, 500, 500, 0, 30],
-  [0, 500, 500, 180, 30]
+  [0, 0, 500, 0, 30],
+  [0, 1000, 500, 45, 30],
+  [1000, 0, 500, 90, 30],
+  [1000, 1000, 500, 135, 30],
+  [0, 0, 500, 180, 30],
+  [500, 500, 1000, 20, 30],
+  [1000, 500, 500, 160, 30],
+  [500, 1000, 500, 60, 30],
+  [500, 500, 500, 120, 30]
 ];
 
 import * as fontkit from 'fontkit';
@@ -111,6 +141,9 @@ const FONT_NAMES = [
   'DotSizeVAR', 'DotValueVAR', 'DotShapeVAR', 'DotMultiVAR', 'DotOrientationVAR', 'DotRotationVAR',
   'SquareSizeVAR', 'SquareValueVAR', 'SquareShapeVAR', 'SquareMultiVAR', 'SquareOrientationVAR', 'SquareRotationVAR',
 ];
+
+const FONT_NAMES_DOT = FONT_NAMES.slice(0, 6);
+const FONT_NAMES_SQUARE = FONT_NAMES.slice(6, 12);
 
 const COMPANION_LABELS = {
   DotSizeVAR: 'Dot Size',
@@ -228,6 +261,20 @@ function generateExtremeAxes() {
   ]);
 }
 
+function generateOrientationPresetAxes() {
+  return [
+    [0, 0, 500, 0, 30],
+    [0, 0, 500, 180, 30],
+    [0, 1000, 500, 0, 30],
+    [0, 1000, 500, 180, 30],
+    [1000, 0, 500, 0, 30],
+    [1000, 0, 500, 180, 30],
+    [1000, 1000, 500, 0, 30],
+    [1000, 1000, 500, 180, 30],
+    [800, 800, 500, 90, 30]
+  ];
+}
+
 function getAxesForStage(state, stageIndex) {
   const pool = state.randomizeStyling ? state.axesPool : BERTIN_STYLE_AXES;
   return pool[stageIndex % pool.length];
@@ -261,6 +308,12 @@ function createStageIndices(mode, numPoints, pointIds) {
         stageIndices2[i] = s4;
       }
     }
+  } else if (mode === 'unifyCuts') {
+    for (let i = 0; i < numPoints; i++) {
+      const s = Math.floor(Math.random() * NUM_STAGES);
+      stageIndices1[i] = s;
+      stageIndices2[i] = s;
+    }
   } else {
     for (let i = 0; i < numPoints; i++) {
       stageIndices1[i] = Math.floor(Math.random() * NUM_STAGES);
@@ -281,7 +334,7 @@ function updateLayoutFooter(state, stageIndices1, stageIndices2) {
   if (!fontInfoEl1 && !fontInfoEl2 && !cssEl1 && !cssEl2) return;
   if (!stageIndices1.length) return;
 
-  const { fontName, useCutout, layer1Visible, layer2Visible, randomizeStyling, fontFeatureSettings } = state;
+  const { fontName1, fontName2, useCutout, layer1Visible, layer2Visible, randomizeStyling, orientationAxesMode, fontFeatureSettings } = state;
   const axes1 = getAxesForStage(state, stageIndices1[0] % NUM_STAGES);
   const axes2 = getAxesForStage(state, stageIndices2[0] % NUM_STAGES);
   const variation1 = getVariationString(axes1);
@@ -291,35 +344,36 @@ function updateLayoutFooter(state, stageIndices1, stageIndices2) {
   const modeParts1 = [];
   if (useCutout) modeParts1.push('výřez');
   if (!layer1Visible) modeParts1.push('vypnuto');
-  if (randomizeStyling) modeParts1.push('náhodné osy');
+  if (randomizeStyling) modeParts1.push(orientationAxesMode ? 'os orientace' : 'náhodné osy');
   const modeStr1 = modeParts1.length ? ` · ${modeParts1.join(', ')}` : '';
 
   const modeParts2 = [];
   if (useCutout) modeParts2.push('výřez');
   if (!layer2Visible) modeParts2.push('vypnuto');
-  if (randomizeStyling) modeParts2.push('náhodné osy');
+  if (randomizeStyling) modeParts2.push(orientationAxesMode ? 'os orientace' : 'náhodné osy');
   const modeStr2 = modeParts2.length ? ` · ${modeParts2.join(', ')}` : '';
 
-  if (fontInfoEl1) fontInfoEl1.textContent = `${COMPANION_LABELS[fontName]} · Vrstva 1 · ss04 Pattern${modeStr1}`;
-  if (fontInfoEl2) fontInfoEl2.textContent = `${COMPANION_LABELS[fontName]} · Vrstva 2 · ss04 Pattern${modeStr2}`;
+  if (fontInfoEl1) fontInfoEl1.textContent = `${COMPANION_LABELS[fontName1]} · Vrstva 1 · ss04 Pattern${modeStr1}`;
+  if (fontInfoEl2) fontInfoEl2.textContent = `${COMPANION_LABELS[fontName2]} · Vrstva 2 · ss04 Pattern${modeStr2}`;
 
-  const cssBlock = (variation) => `font-family: "Bertin-${fontName}", sans-serif;
+  const cssBlock = (fontName, variation) => `font-family: "Bertin-${fontName}", sans-serif;
 font-variation-settings: ${variation};
 font-feature-settings: ${feature};`;
 
-  if (cssEl1) cssEl1.textContent = layer1Visible ? cssBlock(variation1) : '—';
-  if (cssEl2) cssEl2.textContent = layer2Visible ? cssBlock(variation2) : '—';
+  if (cssEl1) cssEl1.textContent = layer1Visible ? cssBlock(fontName1, variation1) : '—';
+  if (cssEl2) cssEl2.textContent = layer2Visible ? cssBlock(fontName2, variation2) : '—';
 }
 
 function renderLayoutToCanvas(state, stageIndices1, stageIndices2) {
-  const { fontName, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible, fontFeatureSettings } = state;
+  const { fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible, fontFeatureSettings } = state;
   const feature = fontFeatureSettings || '"ss04" 1';
 
   const canvas = document.createElement('canvas');
   canvas.width = CANVAS_W;
   canvas.height = CANVAS_H;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fff';
+  const canvasBg = normalizedCanvasBgHex(state.canvasBg);
+  ctx.fillStyle = canvasBg;
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   const layer1Canvas = document.createElement('canvas');
@@ -336,9 +390,8 @@ function renderLayoutToCanvas(state, stageIndices1, stageIndices2) {
   ctx2.clearRect(0, 0, CANVAS_W, CANVAS_H);
   ctx2.globalAlpha = 1;
 
-  const fontFamily = `"Bertin-${fontName}", sans-serif`;
-
-  const drawGlyph = (gCtx, color, variation, fitScale, centerX, centerY, ch) => {
+  const drawGlyph = (gCtx, color, fontName, variation, fitScale, centerX, centerY, ch) => {
+    const fontFamily = `"Bertin-${fontName}", sans-serif`;
     gCtx.save();
     gCtx.translate(centerX, centerY);
     gCtx.scale(fitScale, fitScale);
@@ -361,8 +414,8 @@ function renderLayoutToCanvas(state, stageIndices1, stageIndices2) {
     const variation2 = getVariationString(axes2);
     const char = pointIds[i] ? getGlyphCharForId(pointIds[i]) : 'I';
 
-    const { w: w1, h: h1 } = measureGlyph(char, fontName, variation1, feature);
-    const { w: w2, h: h2 } = measureGlyph(char, fontName, variation2, feature);
+    const { w: w1, h: h1 } = measureGlyph(char, fontName1, variation1, feature);
+    const { w: w2, h: h2 } = measureGlyph(char, fontName2, variation2, feature);
 
     const fitScale1 = Math.min(availCellW / w1, availCellH / h1);
     const fitScale2 = Math.min(availCellW / w2, availCellH / h2);
@@ -373,8 +426,8 @@ function renderLayoutToCanvas(state, stageIndices1, stageIndices2) {
     const centerX = screenX[i];
     const centerY = screenY[i] + offsetY;
 
-    if (layer1Visible) drawGlyph(ctx1, logo1Color, variation1, fitScale1, centerX, centerY, char);
-    if (layer2Visible) drawGlyph(ctx2, logo2Color, variation2, fitScale2, centerX, centerY, char);
+    if (layer1Visible) drawGlyph(ctx1, logo1Color, fontName1, variation1, fitScale1, centerX, centerY, char);
+    if (layer2Visible) drawGlyph(ctx2, logo2Color, fontName2, variation2, fitScale2, centerX, centerY, char);
   }
 
   ctx.drawImage(layer1Canvas, 0, 0);
@@ -406,8 +459,9 @@ function renderLayoutToCanvas(state, stageIndices1, stageIndices2) {
 }
 
 function renderLayout(state, stageIndices1, stageIndices2) {
-  const { container, fontName, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible, useCutout, fontFeatureSettings } = state;
+  const { container, fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible, useCutout, fontFeatureSettings } = state;
   const feature = fontFeatureSettings || '"ss04" 1';
+  const canvasBg = normalizedCanvasBgHex(state.canvasBg);
 
   const oldWrapper = container.querySelector('.layout-wrapper');
   if (oldWrapper) oldWrapper.remove();
@@ -415,7 +469,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
   if (useCutout) {
     const canvas = renderLayoutToCanvas(state, stageIndices1, stageIndices2);
     canvas.className = 'layout-wrapper';
-    canvas.style.cssText = `display: block; background: #fff;`;
+    canvas.style.cssText = `display: block; background: ${canvasBg};`;
     container.appendChild(canvas);
     scaleLayoutToFit(container);
     return;
@@ -423,8 +477,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
 
   const wrapper = document.createElement('div');
   wrapper.className = 'layout-wrapper';
-  wrapper.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff;`;
-  if (state.invert) wrapper.style.filter = 'invert(1)';
+  wrapper.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: ${canvasBg};`;
 
   const renderLayoutDebug = [];
 
@@ -444,8 +497,8 @@ function renderLayout(state, stageIndices1, stageIndices2) {
     const variation2 = getVariationString(axes2);
     const char = pointIds[i] ? getGlyphCharForId(pointIds[i]) : 'I';
 
-    const { w: w1, h: h1 } = measureGlyph(char, fontName, variation1, feature);
-    const { w: w2, h: h2 } = measureGlyph(char, fontName, variation2, feature);
+    const { w: w1, h: h1 } = measureGlyph(char, fontName1, variation1, feature);
+    const { w: w2, h: h2 } = measureGlyph(char, fontName2, variation2, feature);
 
     const fitScale1 = GLYPH_SIZE_FACTOR * Math.min(availCellW / w1, availCellH / h1);
     const fitScale2 = GLYPH_SIZE_FACTOR * Math.min(availCellW / w2, availCellH / h2);
@@ -477,7 +530,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       top: ${screenY[i]}px;
       transform: translate(-50%, ${translateY}) scale(${fitScale1});
       transform-origin: center center;
-      font-family: "Bertin-${fontName}", sans-serif;
+      font-family: "Bertin-${fontName1}", sans-serif;
       font-size: ${FONT_SIZE_LOAD}px;
       font-variation-settings: ${variation1};
       font-feature-settings: ${feature};
@@ -496,7 +549,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       top: ${screenY[i]}px;
       transform: translate(-50%, ${translateY}) scale(${fitScale2});
       transform-origin: center center;
-      font-family: "Bertin-${fontName}", sans-serif;
+      font-family: "Bertin-${fontName2}", sans-serif;
       font-size: ${FONT_SIZE_LOAD}px;
       font-variation-settings: ${variation2};
       font-feature-settings: ${feature};
@@ -583,7 +636,10 @@ function scaleLayoutToFit(container) {
   if (!wrapper) return;
   const availW = container.clientWidth || 1;
   const availH = container.clientHeight || 1;
-  const scale = Math.min(1, availW / CANVAS_W, availH / CANVAS_H);
+  const scaleW = availW / CANVAS_W;
+  const scaleH = availH / CANVAS_H;
+  let scale = Math.max(scaleW, scaleH);
+  if (scale > 1) scale = 1;
   wrapper.style.transform = scale < 1 ? `scale(${scale})` : 'none';
   wrapper.style.transformOrigin = 'center center';
 }
@@ -591,12 +647,22 @@ function scaleLayoutToFit(container) {
 const POSTER_MARGIN = 48;
 const POSTER_FONT_SIZE = 400;
 
-function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterNumber) {
+function posterFeatureKeyToCss(key) {
+  if (!key || key === 'normal') return 'normal';
+  return `"${key}" 1`;
+}
+
+function posterFeatureKeyToFontKit(key) {
+  if (!key || key === 'normal') return {};
+  return { [key]: 1 };
+}
+
+function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterNumber, posterFeatureKey) {
   const posterContainer = document.getElementById('poster-canvas');
   if (!posterContainer) return;
 
-  const { fontName, logo1Color, logo2Color, layer1Visible, layer2Visible, fontFeatureSettings } = state;
-  const feature = fontFeatureSettings || '"ss04" 1';
+  const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const feature = posterFeatureKeyToCss(posterFeatureKey);
 
   const stage1 = stageIndices1[0] % NUM_STAGES;
   const stage2 = stageIndices2[0] % NUM_STAGES;
@@ -608,8 +674,8 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
   const letter = String(posterLetter || 'S').charAt(0);
   const number = String(posterNumber || '1').charAt(0);
 
-  const { w: w1, h: h1 } = measureGlyph(letter, fontName, variation1, feature);
-  const { w: w2, h: h2 } = measureGlyph(number, fontName, variation2, feature);
+  const { w: w1, h: h1 } = measureGlyph(letter, fontName1, variation1, feature);
+  const { w: w2, h: h2 } = measureGlyph(number, fontName2, variation2, feature);
 
   const availW = POSTER_W - 2 * POSTER_MARGIN;
   const availH = POSTER_H - 2 * POSTER_MARGIN;
@@ -623,10 +689,10 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
   const oldWrapper = posterContainer.querySelector('.poster-wrapper');
   if (oldWrapper) oldWrapper.remove();
 
+  const canvasBg = normalizedCanvasBgHex(state.canvasBg);
   const wrapper = document.createElement('div');
   wrapper.className = 'poster-wrapper';
-  wrapper.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: #fff;`;
-  if (state.invert) wrapper.style.filter = 'invert(1)';
+  wrapper.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: ${canvasBg};`;
 
   const layer1 = document.createElement('div');
   layer1.className = 'poster-layer1';
@@ -643,7 +709,7 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
     top: ${centerY}px;
     transform: translate(-50%, -50%) scale(${fitScale});
     transform-origin: center center;
-    font-family: "Bertin-${fontName}", sans-serif;
+    font-family: "Bertin-${fontName1}", sans-serif;
     font-size: ${POSTER_FONT_SIZE}px;
     font-variation-settings: ${variation1};
     font-feature-settings: ${feature};
@@ -661,7 +727,7 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
     top: ${centerY}px;
     transform: translate(-50%, -50%) scale(${fitScale});
     transform-origin: center center;
-    font-family: "Bertin-${fontName}", sans-serif;
+    font-family: "Bertin-${fontName2}", sans-serif;
     font-size: ${POSTER_FONT_SIZE}px;
     font-variation-settings: ${variation2};
     font-feature-settings: ${feature};
@@ -683,14 +749,17 @@ function scalePosterToFit(container) {
   if (!wrapper) return;
   const availW = container.clientWidth || 1;
   const availH = container.clientHeight || 1;
-  const scale = Math.min(1, availW / POSTER_W, availH / POSTER_H);
+  const scaleW = availW / POSTER_W;
+  const scaleH = availH / POSTER_H;
+  let scale = Math.max(scaleW, scaleH);
+  if (scale > 1) scale = 1;
   wrapper.style.transform = scale < 1 ? `scale(${scale})` : 'none';
   wrapper.style.transformOrigin = 'center center';
 }
 
-function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter, posterNumber) {
-  const { fontName, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
-  const feature = state.fontFeatureSettings || '"ss04" 1';
+function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter, posterNumber, posterFeatureKey) {
+  const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const feature = posterFeatureKeyToCss(posterFeatureKey);
 
   const stage1 = stageIndices1[0] % NUM_STAGES;
   const stage2 = stageIndices2[0] % NUM_STAGES;
@@ -702,8 +771,8 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
   const letter = String(posterLetter || 'S').charAt(0);
   const number = String(posterNumber || '1').charAt(0);
 
-  const { w: w1, h: h1 } = measureGlyphNoFeature(letter, fontName, variation1);
-  const { w: w2, h: h2 } = measureGlyphNoFeature(number, fontName, variation2);
+  const { w: w1, h: h1 } = measureGlyph(letter, fontName1, variation1, feature);
+  const { w: w2, h: h2 } = measureGlyph(number, fontName2, variation2, feature);
 
   const availW = POSTER_W - 2 * POSTER_MARGIN;
   const availH = POSTER_H - 2 * POSTER_MARGIN;
@@ -718,12 +787,12 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
   canvas.width = POSTER_W;
   canvas.height = POSTER_H;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fff';
+  const canvasBg = normalizedCanvasBgHex(state.canvasBg);
+  ctx.fillStyle = canvasBg;
   ctx.fillRect(0, 0, POSTER_W, POSTER_H);
 
-  const fontFamily = `"Bertin-${fontName}", sans-serif`;
-
-  const drawGlyph = (gCtx, color, variation, fitScale, cx, cy, ch) => {
+  const drawGlyph = (gCtx, color, fontName, variation, fitScale, cx, cy, ch) => {
+    const fontFamily = `"Bertin-${fontName}", sans-serif`;
     gCtx.save();
     gCtx.translate(cx, cy);
     gCtx.scale(fitScale, fitScale);
@@ -737,10 +806,10 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
     gCtx.restore();
   };
 
-  if (layer1Visible) drawGlyph(ctx, logo1Color, variation1, fitScale, centerX, centerY, letter);
+  if (layer1Visible) drawGlyph(ctx, logo1Color, fontName1, variation1, fitScale, centerX, centerY, letter);
   if (layer2Visible) {
     ctx.globalCompositeOperation = 'multiply';
-    drawGlyph(ctx, logo2Color, variation2, fitScale, centerX, centerY, number);
+    drawGlyph(ctx, logo2Color, fontName2, variation2, fitScale, centerX, centerY, number);
     ctx.globalCompositeOperation = 'source-over';
   }
   return canvas;
@@ -761,7 +830,7 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-function svgToPngBlob(svgString, width, height) {
+function svgToPngBlob(svgString, width, height, bgHex = '#ffffff') {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const blob = new Blob([svgString], { type: 'image/svg+xml' });
@@ -771,7 +840,7 @@ function svgToPngBlob(svgString, width, height) {
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = normalizedCanvasBgHex(bgHex);
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
       canvas.toBlob((b) => {
@@ -791,11 +860,12 @@ function canvasToBlob(canvas) {
   return new Promise((resolve) => canvas.toBlob(resolve));
 }
 
-async function saveLayoutAndPosterPng(shapes) {
+async function saveLayoutAndPosterPng(shapes, canvasBg) {
   if (!shapes) return;
+  const bg = normalizedCanvasBgHex(canvasBg);
   const ts = layoutTimestamp();
-  const layoutBlob = await svgToPngBlob(shapes.layoutSvg, CANVAS_W, CANVAS_H);
-  const posterBlob = await svgToPngBlob(shapes.posterSvg, POSTER_W, POSTER_H);
+  const layoutBlob = await svgToPngBlob(shapes.layoutSvg, CANVAS_W, CANVAS_H, bg);
+  const posterBlob = await svgToPngBlob(shapes.posterSvg, POSTER_W, POSTER_H, bg);
   if (layoutBlob) downloadBlob(layoutBlob, `layout_${ts}.png`);
   if (posterBlob) downloadBlob(posterBlob, `poster_${ts}.png`);
 }
@@ -804,14 +874,14 @@ function escapeXmlAttr(s) {
   return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function getGlyphPathFromFontKit(font, char, fontSize, axes, useSS04) {
+function getGlyphPathFromFontKit(font, char, fontSize, axes, openTypeFeatures) {
   try {
     let fontVar = font;
     if (axes && font.directory?.tables?.fvar) {
       const settings = axesToVariationSettings(axes);
       fontVar = font.getVariation(settings);
     }
-    const features = useSS04 ? { ss04: 1 } : {};
+    const features = openTypeFeatures && typeof openTypeFeatures === 'object' ? openTypeFeatures : {};
     const run = fontVar.layout(char, features);
     if (!run.glyphs.length) return null;
     const glyph = run.glyphs[0];
@@ -831,9 +901,10 @@ function getGlyphPathFromFontKit(font, char, fontSize, axes, useSS04) {
   }
 }
 
-function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
-  const { fontName, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible } = state;
+function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2) {
+  const { fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible } = state;
   const feature = state.fontFeatureSettings || '"ss04" 1';
+  const bgHex = normalizedCanvasBgHex(state.canvasBg);
 
   let layer1Paths = '';
   let layer2Paths = '';
@@ -849,8 +920,8 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
     const variation2 = getVariationString(axes2);
     const char = pointIds[i] ? getGlyphCharForId(pointIds[i]) : 'I';
 
-    const { w: w1, h: h1 } = measureGlyph(char, fontName, variation1, feature);
-    const { w: w2, h: h2 } = measureGlyph(char, fontName, variation2, feature);
+    const { w: w1, h: h1 } = measureGlyph(char, fontName1, variation1, feature);
+    const { w: w2, h: h2 } = measureGlyph(char, fontName2, variation2, feature);
 
     const fitScale1 = GLYPH_SIZE_FACTOR * Math.min(availCellW / w1, availCellH / h1);
     const fitScale2 = GLYPH_SIZE_FACTOR * Math.min(availCellW / w2, availCellH / h2);
@@ -880,8 +951,8 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
     const c1 = `rgb(${logo1Color[0]},${logo1Color[1]},${logo1Color[2]})`;
     const c2 = `rgb(${logo2Color[0]},${logo2Color[1]},${logo2Color[2]})`;
 
-    const glyph1 = getGlyphPathFromFontKit(font, char, FONT_SIZE_LOAD, axes1, true);
-    const glyph2 = getGlyphPathFromFontKit(font, char, FONT_SIZE_LOAD, axes2, true);
+    const glyph1 = getGlyphPathFromFontKit(font1, char, FONT_SIZE_LOAD, axes1, { ss04: 1 });
+    const glyph2 = getGlyphPathFromFontKit(font2, char, FONT_SIZE_LOAD, axes2, { ss04: 1 });
 
     debugAfter.push({
       i,
@@ -927,7 +998,7 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
   if (useCutout) {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-<rect width="100%" height="100%" fill="#ffffff"/>
+<rect width="100%" height="100%" fill="${bgHex}"/>
 <defs>
   <g id="layout-layer1">\n${layer1Paths}</g>
   <g id="layout-layer2">\n${layer2Paths}</g>
@@ -935,7 +1006,7 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
     <feImage xlink:href="#layout-layer1" result="l1"/>
     <feImage xlink:href="#layout-layer2" result="l2"/>
     <feComposite in="l1" in2="l2" operator="in" result="overlap"/>
-    <feFlood flood-color="white" result="white"/>
+    <feFlood flood-color="${bgHex}" result="white"/>
     <feComposite in="white" in2="overlap" operator="in" result="whiteOverlap"/>
     <feBlend in="l1" in2="l2" mode="normal" result="combined"/>
     <feComposite in="whiteOverlap" in2="combined" operator="over" result="final"/>
@@ -946,7 +1017,7 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-<rect width="100%" height="100%" fill="#ffffff"/>
+<rect width="100%" height="100%" fill="${bgHex}"/>
 <g id="layout-content">
 <g id="layer1">\n${layer1Paths}</g>
 <g id="layer2" style="mix-blend-mode:multiply">\n${layer2Paths}</g>
@@ -954,9 +1025,11 @@ function convertLayoutToShapes(font, state, stageIndices1, stageIndices2) {
 </svg>`;
 }
 
-function convertPosterToShapes(font, state, stageIndices1, stageIndices2, posterLetter, posterNumber) {
-  const { fontName, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
-  const feature = state.fontFeatureSettings || '"ss04" 1';
+function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2, posterLetter, posterNumber, posterFeatureKey) {
+  const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const bgHex = normalizedCanvasBgHex(state.canvasBg);
+  const feature = posterFeatureKeyToCss(posterFeatureKey);
+  const posterFk = posterFeatureKeyToFontKit(posterFeatureKey);
 
   const stage1 = stageIndices1[0] % NUM_STAGES;
   const stage2 = stageIndices2[0] % NUM_STAGES;
@@ -973,14 +1046,14 @@ function convertPosterToShapes(font, state, stageIndices1, stageIndices2, poster
   const centerX = POSTER_W / 2;
   const centerY = POSTER_H / 2;
 
-  const { w: w1, h: h1 } = measureGlyph(letter, fontName, variation1, feature);
-  const { w: w2, h: h2 } = measureGlyph(number, fontName, variation2, feature);
+  const { w: w1, h: h1 } = measureGlyph(letter, fontName1, variation1, feature);
+  const { w: w2, h: h2 } = measureGlyph(number, fontName2, variation2, feature);
   const maxW = Math.max(w1, w2);
   const maxH = Math.max(h1, h2);
   const fitScale = Math.min(availW / maxW, availH / maxH) * (FONT_SIZE_LOAD / POSTER_FONT_SIZE);
 
-  const glyph1 = getGlyphPathFromFontKit(font, letter, POSTER_FONT_SIZE, axes1, true);
-  const glyph2 = getGlyphPathFromFontKit(font, number, POSTER_FONT_SIZE, axes2, true);
+  const glyph1 = getGlyphPathFromFontKit(font1, letter, POSTER_FONT_SIZE, axes1, posterFk);
+  const glyph2 = getGlyphPathFromFontKit(font2, number, POSTER_FONT_SIZE, axes2, posterFk);
 
   const c1 = `rgb(${logo1Color[0]},${logo1Color[1]},${logo1Color[2]})`;
   const c2 = `rgb(${logo2Color[0]},${logo2Color[1]},${logo2Color[2]})`;
@@ -1001,7 +1074,7 @@ function convertPosterToShapes(font, state, stageIndices1, stageIndices2, poster
   if (useCutout) {
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-<rect width="100%" height="100%" fill="#ffffff"/>
+<rect width="100%" height="100%" fill="${bgHex}"/>
 <defs>
   <g id="poster-layer1">\n${layer1Paths}</g>
   <g id="poster-layer2">\n${layer2Paths}</g>
@@ -1009,7 +1082,7 @@ function convertPosterToShapes(font, state, stageIndices1, stageIndices2, poster
     <feImage xlink:href="#poster-layer1" result="l1"/>
     <feImage xlink:href="#poster-layer2" result="l2"/>
     <feComposite in="l1" in2="l2" operator="in" result="overlap"/>
-    <feFlood flood-color="white" result="white"/>
+    <feFlood flood-color="${bgHex}" result="white"/>
     <feComposite in="white" in2="overlap" operator="in" result="whiteOverlap"/>
     <feBlend in="l1" in2="l2" mode="normal" result="combined"/>
     <feComposite in="whiteOverlap" in2="combined" operator="over" result="final"/>
@@ -1020,26 +1093,31 @@ function convertPosterToShapes(font, state, stageIndices1, stageIndices2, poster
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-<rect width="100%" height="100%" fill="#ffffff"/>
+<rect width="100%" height="100%" fill="${bgHex}"/>
 <g id="layer1">\n${layer1Paths}</g>
 <g id="layer2" style="mix-blend-mode:multiply">\n${layer2Paths}</g>
 </svg>`;
 }
 
 async function convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs) {
-  const fontUrl = FONT_FILES[state.fontName];
-  if (!fontUrl) return null;
-  const font = await loadFontKit(fontUrl);
+  const fontUrl1 = FONT_FILES[state.fontName1];
+  const fontUrl2 = FONT_FILES[state.fontName2];
+  if (!fontUrl1 || !fontUrl2) return null;
+  const font1 = await loadFontKit(fontUrl1);
+  const font2 = await loadFontKit(fontUrl2);
   const posterInputs = getPosterInputs();
-  const layoutSvg = convertLayoutToShapes(font, state, stageIndices1, stageIndices2);
-  const posterSvg = convertPosterToShapes(font, state, stageIndices1, stageIndices2, posterInputs.letter, posterInputs.number);
+  const layoutSvg = convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2);
+  const posterSvg = convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2, posterInputs.letter, posterInputs.number);
   return { layoutSvg, posterSvg };
 }
 
 function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {}) {
-  const { invert = false, cutout = false } = options;
+  const { cutout = false, canvasBg: canvasBgOpt } = options;
+  const canvasBg = normalizedCanvasBgHex(canvasBgOpt || '#ffffff');
   const layoutEl = document.getElementById('layout-canvas');
   const posterEl = document.getElementById('poster-canvas');
+  if (layoutEl) layoutEl.style.background = canvasBg;
+  if (posterEl) posterEl.style.background = canvasBg;
   const svgPart = (s) => {
     const i = s.indexOf('<svg');
     return i >= 0 ? s.substring(i) : s;
@@ -1053,8 +1131,7 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
       layoutEl.appendChild(wrap);
     }
     wrap.className = cutout ? 'layout-wrapper layout-cutout-view' : 'layout-wrapper layout-shapes-view';
-    wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: #fff;`;
-    if (invert) wrap.style.filter = 'invert(1)';
+    wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: ${canvasBg};`;
     wrap.innerHTML = svgPart(layoutSvg);
     if (savedTransform && savedTransform !== 'none') {
       wrap.style.transform = savedTransform;
@@ -1153,8 +1230,7 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
     posterEl.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.className = cutout ? 'poster-wrapper poster-cutout-view' : 'poster-wrapper poster-shapes-view';
-    wrap.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: #fff;`;
-    if (invert) wrap.style.filter = 'invert(1)';
+    wrap.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: ${canvasBg};`;
     wrap.innerHTML = svgPart(posterSvg);
     posterEl.appendChild(wrap);
     scalePosterToFit(posterEl);
@@ -1185,12 +1261,17 @@ export function initLayout(containerId) {
       const pointIds = POINT_IDS.slice(0, svgPositions.length);
       const numPoints = svgPositions.length;
 
-      let fontName = FONT_NAMES[Math.floor(Math.random() * FONT_NAMES.length)];
+      let pairIdx = Math.floor(Math.random() * FONT_NAMES_DOT.length);
+      let fontName1 = FONT_NAMES_DOT[pairIdx];
+      let fontName2 = FONT_NAMES_SQUARE[pairIdx];
       try {
-        await loadFont(fontName);
+        await loadFont(fontName1);
+        await loadFont(fontName2);
       } catch (e) {
-        fontName = 'DotSizeVAR';
-        await loadFont(fontName);
+        fontName1 = 'DotSizeVAR';
+        fontName2 = 'SquareSizeVAR';
+        await loadFont(fontName1);
+        await loadFont(fontName2);
       }
       await document.fonts.ready;
 
@@ -1240,7 +1321,8 @@ export function initLayout(containerId) {
 
       const state = {
         container,
-        fontName,
+        fontName1,
+        fontName2,
         palette,
         idx1,
         idx2,
@@ -1257,41 +1339,57 @@ export function initLayout(containerId) {
         layer2Visible: true,
         useCutout: false,
         cutout: false,
-        invert: false,
         randomizeStyling: false,
         extremeStyling: false,
+        orientationAxesMode: false,
         axesPool: [],
-        fontFeatureSettings: '"ss04" 1'
+        fontFeatureSettings: '"ss04" 1',
+        canvasBg: loadCanvasBgFromStorage() || '#ffffff'
       };
 
       const getPosterInputs = () => ({
         letter: document.getElementById('poster-letter')?.value || 'S',
-        number: document.getElementById('poster-number')?.value || '1'
+        number: document.getElementById('poster-number')?.value || '1',
+        featureKey: document.getElementById('poster-feature')?.value || 'normal'
       });
 
       let convertedShapes = null;
+      let krok1ConfirmedForSvg = false;
 
-      const setExportEnabled = (enabled) => {
+      const syncExportButtons = () => {
         const png = document.getElementById('layout-btn-png');
         const svg = document.getElementById('layout-btn-svg');
-        if (png) png.disabled = !enabled;
-        if (svg) svg.disabled = !enabled;
+        const hasShapes = !!convertedShapes;
+        if (png) png.disabled = !hasShapes;
+        if (svg) svg.disabled = !hasShapes || !krok1ConfirmedForSvg;
+      };
+
+      let updateLayer1Swatch;
+      let updateLayer2Swatch;
+      let updateCanvasBgSwatch;
+
+      const paintView = () => {
+        if (state.randomizeStyling) {
+          if (state.extremeStyling) state.axesPool = generateExtremeAxes();
+          else if (state.orientationAxesMode) state.axesPool = generateOrientationPresetAxes();
+          else state.axesPool = generateRandomAxes();
+        }
+        renderLayout(state, stageIndices1, stageIndices2);
+        const pi = getPosterInputs();
+        renderPoster(state, stageIndices1, stageIndices2, pi.letter, pi.number, pi.featureKey);
+        updateLayoutFooter(state, stageIndices1, stageIndices2);
+        syncCanvasChromeBg(state);
+        if (updateLayer1Swatch) updateLayer1Swatch();
+        if (updateLayer2Swatch) updateLayer2Swatch();
+        if (updateCanvasBgSwatch) updateCanvasBgSwatch();
       };
 
       const reRender = () => {
         convertedShapes = null;
-        setExportEnabled(false);
-        if (state.randomizeStyling) state.axesPool = state.extremeStyling ? generateExtremeAxes() : generateRandomAxes();
-        renderLayout(state, stageIndices1, stageIndices2);
-        renderPoster(state, stageIndices1, stageIndices2, getPosterInputs().letter, getPosterInputs().number);
-        updateLayoutFooter(state, stageIndices1, stageIndices2);
-        if (updateLayer1Swatch) updateLayer1Swatch();
-        if (updateLayer2Swatch) updateLayer2Swatch();
+        krok1ConfirmedForSvg = false;
+        syncExportButtons();
+        paintView();
       };
-
-      renderLayout(state, stageIndices1, stageIndices2);
-      renderPoster(state, stageIndices1, stageIndices2, getPosterInputs().letter, getPosterInputs().number);
-      updateLayoutFooter(state, stageIndices1, stageIndices2);
 
       function buildLayerSwatch(containerId, getColor, setColor) {
         const container = document.getElementById(containerId);
@@ -1330,7 +1428,50 @@ export function initLayout(containerId) {
         return update;
       }
 
-      let updateLayer1Swatch, updateLayer2Swatch;
+      function buildCanvasBgSwatch() {
+        const el = document.getElementById('layout-canvas-bg-swatch');
+        if (!el) return () => {};
+        const update = () => {
+          const h = normalizedCanvasBgHex(state.canvasBg);
+          colorInput.value = h;
+          hexInput.value = h;
+        };
+        const h0 = normalizedCanvasBgHex(state.canvasBg);
+        el.innerHTML = '';
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.value = h0;
+        const hexInput = document.createElement('input');
+        hexInput.type = 'text';
+        hexInput.value = h0;
+        hexInput.placeholder = '#ffffff';
+        hexInput.maxLength = 7;
+        const applyFromHex = (raw) => {
+          const rgb = hexToRgb(raw);
+          if (!rgb) return;
+          state.canvasBg = normalizedCanvasBgHex(raw);
+          saveCanvasBgToStorage(state.canvasBg);
+          colorInput.value = state.canvasBg;
+          hexInput.value = state.canvasBg;
+          paintView();
+          if (convertedShapes) {
+            convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs).then((shapes) => {
+              if (shapes) {
+                convertedShapes = shapes;
+                displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { cutout: state.cutout, canvasBg: state.canvasBg });
+              }
+            }).catch((e) => console.error('Convert failed:', e));
+          }
+        };
+        colorInput.addEventListener('input', () => applyFromHex(colorInput.value));
+        colorInput.addEventListener('change', () => applyFromHex(colorInput.value));
+        hexInput.addEventListener('change', () => applyFromHex(hexInput.value));
+        hexInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyFromHex(hexInput.value); });
+        el.appendChild(colorInput);
+        el.appendChild(hexInput);
+        return update;
+      }
+
       updateLayer1Swatch = buildLayerSwatch('layout-layer1-swatch', () => state.logo1Color, (rgb) => {
         state.logo1Color = rgb;
         state.palette[state.idx1] = rgb;
@@ -1389,6 +1530,9 @@ export function initLayout(containerId) {
       }
 
       buildPaletteSwatches();
+      updateCanvasBgSwatch = buildCanvasBgSwatch();
+      paintView();
+      syncExportButtons();
 
       const updateMode = (mode) => {
         const { stageIndices1: s1, stageIndices2: s2 } = createStageIndices(mode, numPoints, pointIds);
@@ -1397,15 +1541,37 @@ export function initLayout(containerId) {
         reRender();
       };
 
+      const applyUnifyCuts = async () => {
+        const group = Math.random() < 0.5 ? FONT_NAMES_DOT : FONT_NAMES_SQUARE;
+        let i1 = Math.floor(Math.random() * group.length);
+        let i2 = Math.floor(Math.random() * group.length);
+        while (group.length > 1 && i2 === i1) {
+          i2 = Math.floor(Math.random() * group.length);
+        }
+        const name1 = group[i1];
+        const name2 = group[i2];
+        await loadFont(name1);
+        await loadFont(name2);
+        await document.fonts.ready;
+        state.fontName1 = name1;
+        state.fontName2 = name2;
+        const { stageIndices1: s1, stageIndices2: s2 } = createStageIndices('unifyCuts', numPoints, pointIds);
+        stageIndices1.splice(0, stageIndices1.length, ...s1);
+        stageIndices2.splice(0, stageIndices2.length, ...s2);
+        reRender();
+      };
+
       document.getElementById('layout-btn-convert')?.addEventListener('click', async () => {
+        if (!window.confirm('Převést návrh na vektorové tvary?')) return;
         const btn = document.getElementById('layout-btn-convert');
         if (btn) btn.disabled = true;
         try {
           const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
           if (shapes) {
             convertedShapes = shapes;
-            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { invert: state.invert, cutout: state.cutout });
-            setExportEnabled(true);
+            krok1ConfirmedForSvg = true;
+            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { cutout: state.cutout, canvasBg: state.canvasBg });
+            syncExportButtons();
           }
         } catch (e) {
           console.error('Convert failed:', e);
@@ -1414,10 +1580,24 @@ export function initLayout(containerId) {
         }
       });
 
-      document.getElementById('layout-btn-png')?.addEventListener('click', () => saveLayoutAndPosterPng(convertedShapes));
-      document.getElementById('layout-btn-svg')?.addEventListener('click', () => saveLayoutAndPosterSvg(convertedShapes));
+      document.getElementById('layout-btn-png')?.addEventListener('click', () => saveLayoutAndPosterPng(convertedShapes, state.canvasBg));
+      document.getElementById('layout-btn-svg')?.addEventListener('click', () => {
+        if (!convertedShapes || !krok1ConfirmedForSvg) return;
+        saveLayoutAndPosterSvg(convertedShapes);
+      });
       document.getElementById('layout-btn-unify')?.addEventListener('click', () => updateMode('unify'));
       document.getElementById('layout-btn-symmetrical')?.addEventListener('click', () => updateMode('symmetrical'));
+      document.getElementById('layout-btn-unify-cuts')?.addEventListener('click', async () => {
+        const btn = document.getElementById('layout-btn-unify-cuts');
+        if (btn) btn.disabled = true;
+        try {
+          await applyUnifyCuts();
+        } catch (e) {
+          console.warn('Sjednotit rezy failed:', e);
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      });
 
       document.getElementById('layout-btn-layer1')?.addEventListener('click', () => {
         state.layer1Visible = !state.layer1Visible;
@@ -1437,49 +1617,87 @@ export function initLayout(containerId) {
           const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
           if (shapes) {
             convertedShapes = shapes;
-            setExportEnabled(true);
-            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { invert: state.invert, cutout: state.cutout });
+            syncExportButtons();
+            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { cutout: state.cutout, canvasBg: state.canvasBg });
           }
         } finally {
           if (btn) btn.disabled = false;
         }
       });
 
-      document.getElementById('layout-btn-invert')?.addEventListener('click', () => {
-        state.invert = !state.invert;
-        if (convertedShapes) {
-          displayShapesAsSvg(convertedShapes.layoutSvg, convertedShapes.posterSvg, container, { invert: state.invert, cutout: state.cutout });
-        } else {
-          const layoutWrap = document.querySelector('#layout-canvas .layout-wrapper');
-          const posterWrap = document.querySelector('#poster-canvas .poster-wrapper');
-          if (layoutWrap) layoutWrap.style.filter = state.invert ? 'invert(1)' : '';
-          if (posterWrap) posterWrap.style.filter = state.invert ? 'invert(1)' : '';
-        }
-      });
-
       document.getElementById('layout-btn-randomize')?.addEventListener('click', () => {
         state.randomizeStyling = !state.randomizeStyling;
         state.extremeStyling = false;
+        state.orientationAxesMode = false;
         reRender();
       });
 
       document.getElementById('layout-btn-extreme')?.addEventListener('click', () => {
         state.randomizeStyling = true;
         state.extremeStyling = true;
+        state.orientationAxesMode = false;
         state.axesPool = generateExtremeAxes();
         reRender();
       });
 
-      document.getElementById('layout-btn-typeface')?.addEventListener('click', async () => {
-        const idx = FONT_NAMES.indexOf(state.fontName);
-        const nextIdx = (idx + 1) % FONT_NAMES.length;
-        const nextFont = FONT_NAMES[nextIdx];
+      document.getElementById('layout-btn-orientation-axes')?.addEventListener('click', async () => {
+        const f1 = 'DotOrientationVAR';
+        const f2 = 'SquareOrientationVAR';
         try {
-          await loadFont(nextFont);
-          state.fontName = nextFont;
+          await loadFont(f1);
+          await loadFont(f2);
+          state.fontName1 = f1;
+          state.fontName2 = f2;
+          state.randomizeStyling = true;
+          state.extremeStyling = false;
+          state.orientationAxesMode = true;
+          state.axesPool = generateOrientationPresetAxes();
           reRender();
         } catch (e) {
-          console.warn('Failed to load font:', nextFont, e);
+          console.warn('Failed to load orientation fonts:', e);
+        }
+      });
+
+      document.getElementById('layout-btn-typeface')?.addEventListener('click', async () => {
+        const i = FONT_NAMES_DOT.indexOf(state.fontName1);
+        const cur = i >= 0 ? i : 0;
+        const nextPair = (cur + 1) % FONT_NAMES_DOT.length;
+        const next1 = FONT_NAMES_DOT[nextPair];
+        const next2 = FONT_NAMES_SQUARE[nextPair];
+        try {
+          await loadFont(next1);
+          await loadFont(next2);
+          state.fontName1 = next1;
+          state.fontName2 = next2;
+          reRender();
+        } catch (e) {
+          console.warn('Failed to load font:', next1, next2, e);
+        }
+      });
+
+      document.getElementById('layout-btn-typeface-1')?.addEventListener('click', async () => {
+        const i = FONT_NAMES_DOT.indexOf(state.fontName1);
+        const cur = i >= 0 ? i : 0;
+        const next1 = FONT_NAMES_DOT[(cur + 1) % FONT_NAMES_DOT.length];
+        try {
+          await loadFont(next1);
+          state.fontName1 = next1;
+          reRender();
+        } catch (e) {
+          console.warn('Failed to load font:', next1, e);
+        }
+      });
+
+      document.getElementById('layout-btn-typeface-2')?.addEventListener('click', async () => {
+        const i = FONT_NAMES_SQUARE.indexOf(state.fontName2);
+        const cur = i >= 0 ? i : 0;
+        const next2 = FONT_NAMES_SQUARE[(cur + 1) % FONT_NAMES_SQUARE.length];
+        try {
+          await loadFont(next2);
+          state.fontName2 = next2;
+          reRender();
+        } catch (e) {
+          console.warn('Failed to load font:', next2, e);
         }
       });
 
@@ -1521,14 +1739,18 @@ export function initLayout(containerId) {
         if (!state.layer1Visible && !state.layer2Visible) state.layer2Visible = true;
         state.randomizeStyling = Math.random() < 0.7;
         state.extremeStyling = state.randomizeStyling && Math.random() < 0.5;
+        state.orientationAxesMode = false;
         if (state.randomizeStyling) state.axesPool = state.extremeStyling ? generateExtremeAxes() : generateRandomAxes();
-        const fontIdx = Math.floor(Math.random() * FONT_NAMES.length);
-        const nextFont = FONT_NAMES[fontIdx];
+        const rp = Math.floor(Math.random() * FONT_NAMES_DOT.length);
+        const next1 = FONT_NAMES_DOT[rp];
+        const next2 = FONT_NAMES_SQUARE[rp];
         try {
-          await loadFont(nextFont);
-          state.fontName = nextFont;
+          await loadFont(next1);
+          await loadFont(next2);
+          state.fontName1 = next1;
+          state.fontName2 = next2;
         } catch (e) {
-          console.warn('Failed to load font:', nextFont, e);
+          console.warn('Failed to load font:', next1, next2, e);
         }
         state.idx1 = Math.floor(Math.random() * state.palette.length);
         state.idx2 = Math.floor(Math.random() * state.palette.length);
@@ -1553,6 +1775,8 @@ export function initLayout(containerId) {
       document.getElementById('poster-letter')?.addEventListener('change', reRender);
       document.getElementById('poster-number')?.addEventListener('input', reRender);
       document.getElementById('poster-number')?.addEventListener('change', reRender);
+      document.getElementById('poster-feature')?.addEventListener('input', reRender);
+      document.getElementById('poster-feature')?.addEventListener('change', reRender);
     })
     .catch((err) => {
       console.error('Failed to load layout:', err);
