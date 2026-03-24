@@ -2,10 +2,11 @@ $color-primary: #0066cc;
 $color-visited: #663399;
 $color-border: #ccc;
 $color-bg: #fff;
-$color-text: #000;
 
 $color-page-bg: #2e2e2e;
 $color-page-text: #e8e8e8;
+
+$color-text: $color-page-text;
 
 $font-family: 'Datatype', system-ui, sans-serif;
 $font-size-base: 1rem;

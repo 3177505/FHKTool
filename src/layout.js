@@ -20,6 +20,8 @@ const RIGHT_IDS = new Set(['ID-R3-4', 'ID-R4-3', 'ID-R5-3', 'ID-R2-1', 'ID-R1-1'
 
 const SVG_PATH_TO_POINT_INDEX = [3, 0, 1, 2, 5, 7, 6, 10, 9, 8, 4];
 
+const SVG_PATH_TO_POINT_INDEX_LOGO_START = [3, 4, 0, 1, 2, 5, 7, 6, 10, 9, 8];
+
 const PALETTE_COLORS = [
   [0, 0, 0],
   [11, 24, 148],
@@ -170,7 +172,7 @@ function getGlyphCharForId(id) {
   return 'I';
 }
 
-function parseSvgPositions(svgText) {
+function parseSvgPositions(svgText, pathIndexMap = SVG_PATH_TO_POINT_INDEX) {
   const pathPositions = [];
   const pathPattern = /d="M([\d.]+),([\d.]+)/g;
   let m;
@@ -178,8 +180,8 @@ function parseSvgPositions(svgText) {
     pathPositions.push([parseFloat(m[1]), parseFloat(m[2])]);
   }
   const positions = new Array(POINT_IDS.length);
-  for (let i = 0; i < pathPositions.length && i < SVG_PATH_TO_POINT_INDEX.length; i++) {
-    positions[SVG_PATH_TO_POINT_INDEX[i]] = [...pathPositions[i]];
+  for (let i = 0; i < pathPositions.length && i < pathIndexMap.length; i++) {
+    positions[pathIndexMap[i]] = [...pathPositions[i]];
   }
   const positionsToUse = positions.filter(Boolean).length === pathPositions.length
     ? positions.filter(Boolean)
@@ -198,6 +200,46 @@ function parseSvgPositions(svgText) {
     p[1] -= minY;
   }
   return { positions: positionsToUse, svgWidth, svgHeight };
+}
+
+function computeLayoutScreenGeometry(parsed) {
+  const { positions, svgWidth, svgHeight } = parsed;
+  const numPoints = positions.length;
+  const availW = CANVAS_W - 2 * LAYOUT_MARGIN;
+  const availH = CANVAS_H - 2 * LAYOUT_MARGIN;
+  const layoutScale = Math.min(availW / svgWidth, availH / svgHeight);
+  const scaledW = svgWidth * layoutScale;
+  const scaledH = svgHeight * layoutScale;
+  const layoutOffsetX = LAYOUT_MARGIN + (availW - scaledW) / 2;
+  const layoutOffsetY = LAYOUT_MARGIN + (availH - scaledH) / 2;
+  const screenX = new Array(numPoints);
+  const screenY = new Array(numPoints);
+  for (let i = 0; i < numPoints; i++) {
+    screenX[i] = layoutOffsetX + positions[i][0] * layoutScale;
+    screenY[i] = layoutOffsetY + positions[i][1] * layoutScale;
+  }
+  const cols = Math.max(4, Math.ceil(Math.sqrt(numPoints)));
+  const rows = Math.ceil(numPoints / cols);
+  const cellWidth = (svgWidth / cols) * layoutScale;
+  const cellHeight = (svgHeight / rows) * layoutScale;
+  const availCellW = cellWidth - CELL_PADDING * 2;
+  const availCellH = cellHeight - CELL_PADDING * 2;
+  return { screenX, screenY, availCellW, availCellH, cellHeight };
+}
+
+function verticalVisualCenterShiftForLayout(availCellW, availCellH, fontName1, fontName2, pointIds, feature) {
+  const axes = [500, 500, 500, 90, 90];
+  const variation = getVariationString(axes);
+  let maxHalf = 0;
+  for (const id of pointIds) {
+    const ch = getGlyphCharForId(id);
+    for (const fontName of [fontName1, fontName2]) {
+      const { w, h } = measureGlyph(ch, fontName, variation, feature);
+      const fitScale = GLYPH_SIZE_FACTOR * Math.min(availCellW / w, availCellH / h);
+      maxHalf = Math.max(maxHalf, (fitScale * h) / 2);
+    }
+  }
+  return maxHalf;
 }
 
 function loadFont(name) {
@@ -365,7 +407,12 @@ font-feature-settings: ${feature};`;
 }
 
 function renderLayoutToCanvas(state, stageIndices1, stageIndices2) {
-  const { fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible, fontFeatureSettings } = state;
+  const { fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, layer1Visible, layer2Visible, fontFeatureSettings } = state;
+  const screenX = state.exportScreenX;
+  const screenY = state.exportScreenY;
+  const availCellW = state.exportAvailCellW;
+  const availCellH = state.exportAvailCellH;
+  const cellHeight = state.exportCellHeight;
   const feature = fontFeatureSettings || '"ss04" 1';
 
   const canvas = document.createElement('canvas');
@@ -390,17 +437,17 @@ function renderLayoutToCanvas(state, stageIndices1, stageIndices2) {
   ctx2.clearRect(0, 0, CANVAS_W, CANVAS_H);
   ctx2.globalAlpha = 1;
 
-  const drawGlyph = (gCtx, color, fontName, variation, fitScale, centerX, centerY, ch) => {
+  const drawGlyph = (gCtx, color, fontName, variation, fitScale, anchorX, anchorBottomY, ch) => {
     const fontFamily = `"Bertin-${fontName}", sans-serif`;
     gCtx.save();
-    gCtx.translate(centerX, centerY);
+    gCtx.translate(anchorX, anchorBottomY);
     gCtx.scale(fitScale, fitScale);
     gCtx.font = `${FONT_SIZE_LOAD}px ${fontFamily}`;
     gCtx.fontVariationSettings = variation;
     gCtx.fontFeatureSettings = feature;
     gCtx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
     gCtx.textAlign = 'center';
-    gCtx.textBaseline = 'middle';
+    gCtx.textBaseline = 'bottom';
     gCtx.fillText(ch, 0, 0);
     gCtx.restore();
   };
@@ -506,7 +553,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
     const pointId = pointIds[i] || '';
     const isDAtL3R3 = pointId === 'ID-L3-4' || pointId === 'ID-R3-4';
     const offsetY = isDAtL3R3 ? cellHeight * D_OFFSET_Y : 0;
-    const translateY = offsetY > 0 ? `calc(-50% + ${offsetY}px)` : '-50%';
+    const translateY = offsetY > 0 ? `calc(-100% + ${offsetY}px)` : '-100%';
 
     renderLayoutDebug.push({
       i,
@@ -515,7 +562,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       left: screenX[i],
       top: screenY[i],
       offsetY,
-      effectiveCenterY: screenY[i] + offsetY,
+      anchorBottomY: screenY[i] + offsetY,
       translateY,
       fitScale1,
       fitScale2
@@ -529,7 +576,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       left: ${screenX[i]}px;
       top: ${screenY[i]}px;
       transform: translate(-50%, ${translateY}) scale(${fitScale1});
-      transform-origin: center center;
+      transform-origin: center bottom;
       font-family: "Bertin-${fontName1}", sans-serif;
       font-size: ${FONT_SIZE_LOAD}px;
       font-variation-settings: ${variation1};
@@ -548,7 +595,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       left: ${screenX[i]}px;
       top: ${screenY[i]}px;
       transform: translate(-50%, ${translateY}) scale(${fitScale2});
-      transform-origin: center center;
+      transform-origin: center bottom;
       font-family: "Bertin-${fontName2}", sans-serif;
       font-size: ${FONT_SIZE_LOAD}px;
       font-variation-settings: ${variation2};
@@ -579,18 +626,18 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       const relX = r.x - wr.x;
       const relY = r.y - wr.y;
       const centerX = (relX + r.width / 2) / scaleX;
-      const centerY = (relY + r.height / 2) / scaleY;
-      const expectedCenterX = setLeft;
-      const expectedCenterY = (set?.effectiveCenterY ?? setTop);
-      const diffX = centerX - expectedCenterX;
-      const diffY = centerY - expectedCenterY;
+      const bottomY = (relY + r.height) / scaleY;
+      const expectedAnchorX = setLeft;
+      const expectedBottomY = set?.anchorBottomY ?? setTop;
+      const diffX = centerX - expectedAnchorX;
+      const diffY = bottomY - expectedBottomY;
       const row = {
         i,
         pointId: set?.pointId,
         char: set?.char,
         set: { left: setLeft, top: setTop },
-        expectedCenter: { x: expectedCenterX, y: expectedCenterY },
-        actualCenter: { x: centerX, y: centerY },
+        expectedAnchor: { x: expectedAnchorX, bottomY: expectedBottomY },
+        actual: { centerX, bottomY },
         diff: { x: diffX, y: diffY },
         width: r.width,
         height: r.height
@@ -602,10 +649,10 @@ function renderLayout(state, stageIndices1, stageIndices2) {
     console.table(spanDebug.map((r) => ({
       i: r.i,
       pointId: r.pointId,
-      'exp.centerX': r.expectedCenter.x.toFixed(1),
-      'exp.centerY': r.expectedCenter.y.toFixed(1),
-      'act.centerX': r.actualCenter.x.toFixed(1),
-      'act.centerY': r.actualCenter.y.toFixed(1),
+      'exp.anchorX': r.expectedAnchor.x.toFixed(1),
+      'exp.bottomY': r.expectedAnchor.bottomY.toFixed(1),
+      'act.centerX': r.actual.centerX.toFixed(1),
+      'act.bottomY': r.actual.bottomY.toFixed(1),
       'diff.x': r.diff.x.toFixed(1),
       'diff.y': r.diff.y.toFixed(1)
     })));
@@ -623,7 +670,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
         viewport: { x: firstSpanRect.x, y: firstSpanRect.y },
         fromCanvasTop: firstSpanRect.y - layoutCanvas.y,
         fromWrapperTop: firstSpanRect.y - wr.y,
-        centerFromCanvasTop: (firstSpanRect.y - layoutCanvas.y + firstSpanRect.height / 2)
+        bottomFromCanvasTop: firstSpanRect.y - layoutCanvas.y + firstSpanRect.height
       } : null
     };
     console.log('[Layout context - FONT view]', layoutContext);
@@ -893,16 +940,22 @@ function getGlyphPathFromFontKit(font, char, fontSize, axes, openTypeFeatures) {
     if (!box) return null;
     const cx = (box.minX + box.maxX) / 2;
     const cy = (box.minY + box.maxY) / 2;
+    const bottomY = box.minY;
     const width = box.maxX - box.minX;
     const height = box.maxY - box.minY;
-    return { pathData, cx, cy, width, height };
+    return { pathData, cx, cy, bottomY, width, height };
   } catch {
     return null;
   }
 }
 
 function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2) {
-  const { fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible } = state;
+  const { fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, layer1Visible, layer2Visible } = state;
+  const screenX = state.exportScreenX;
+  const screenY = state.exportScreenY;
+  const availCellW = state.exportAvailCellW;
+  const availCellH = state.exportAvailCellH;
+  const cellHeight = state.exportCellHeight;
   const feature = state.fontFeatureSettings || '"ss04" 1';
   const bgHex = normalizedCanvasBgHex(state.canvasBg);
 
@@ -962,16 +1015,16 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
       svgPosY: posY,
       fitScale1,
       fitScale2,
-      glyph1: glyph1 ? { cx: glyph1.cx, cy: glyph1.cy, width: glyph1.width, height: glyph1.height } : null,
-      glyph2: glyph2 ? { cx: glyph2.cx, cy: glyph2.cy, width: glyph2.width, height: glyph2.height } : null
+      glyph1: glyph1 ? { cx: glyph1.cx, cy: glyph1.cy, bottomY: glyph1.bottomY, width: glyph1.width, height: glyph1.height } : null,
+      glyph2: glyph2 ? { cx: glyph2.cx, cy: glyph2.cy, bottomY: glyph2.bottomY, width: glyph2.width, height: glyph2.height } : null
     });
 
     if (layer1Visible && glyph1) {
-      const tr = `translate(${screenX[i]},${posY}) scale(${fitScale1}) scale(1,-1) translate(${-glyph1.cx},${-glyph1.cy})`;
+      const tr = `translate(${screenX[i]},${posY}) scale(${fitScale1}) scale(1,-1) translate(${-glyph1.cx},${-glyph1.bottomY})`;
       layer1Paths += `  <path data-idx="${i}" d="${escapeXmlAttr(glyph1.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
     }
     if (layer2Visible && glyph2) {
-      const tr = `translate(${screenX[i]},${posY}) scale(${fitScale2}) scale(1,-1) translate(${-glyph2.cx},${-glyph2.cy})`;
+      const tr = `translate(${screenX[i]},${posY}) scale(${fitScale2}) scale(1,-1) translate(${-glyph2.cx},${-glyph2.bottomY})`;
       layer2Paths += `  <path data-idx="${i}" d="${escapeXmlAttr(glyph2.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
     }
   }
@@ -996,15 +1049,16 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
 
   const useCutout = state.cutout && layer1Paths && layer2Paths;
   if (useCutout) {
+    const cutoutAlignRect = `<rect x="0" y="0" width="${CANVAS_W}" height="${CANVAS_H}" fill="none"/>\n`;
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 <defs>
-  <g id="layout-layer1">\n${layer1Paths}</g>
-  <g id="layout-layer2">\n${layer2Paths}</g>
+  <g id="layout-layer1">\n${cutoutAlignRect}${layer1Paths}</g>
+  <g id="layout-layer2">\n${cutoutAlignRect}${layer2Paths}</g>
   <filter id="layout-cutout" x="-10%" y="-10%" width="120%" height="120%">
-    <feImage xlink:href="#layout-layer1" result="l1"/>
-    <feImage xlink:href="#layout-layer2" result="l2"/>
+    <feImage xlink:href="#layout-layer1" result="l1" width="${CANVAS_W}" height="${CANVAS_H}"/>
+    <feImage xlink:href="#layout-layer2" result="l2" width="${CANVAS_W}" height="${CANVAS_H}"/>
     <feComposite in="l1" in2="l2" operator="in" result="overlap"/>
     <feFlood flood-color="${bgHex}" result="white"/>
     <feComposite in="white" in2="overlap" operator="in" result="whiteOverlap"/>
@@ -1072,15 +1126,16 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
 
   const useCutout = state.cutout && layer1Paths && layer2Paths;
   if (useCutout) {
+    const cutoutAlignRect = `<rect x="0" y="0" width="${POSTER_W}" height="${POSTER_H}" fill="none"/>\n`;
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 <defs>
-  <g id="poster-layer1">\n${layer1Paths}</g>
-  <g id="poster-layer2">\n${layer2Paths}</g>
+  <g id="poster-layer1">\n${cutoutAlignRect}${layer1Paths}</g>
+  <g id="poster-layer2">\n${cutoutAlignRect}${layer2Paths}</g>
   <filter id="poster-cutout" x="-10%" y="-10%" width="120%" height="120%">
-    <feImage xlink:href="#poster-layer1" result="l1"/>
-    <feImage xlink:href="#poster-layer2" result="l2"/>
+    <feImage xlink:href="#poster-layer1" result="l1" width="${POSTER_W}" height="${POSTER_H}"/>
+    <feImage xlink:href="#poster-layer2" result="l2" width="${POSTER_W}" height="${POSTER_H}"/>
     <feComposite in="l1" in2="l2" operator="in" result="overlap"/>
     <feFlood flood-color="${bgHex}" result="white"/>
     <feComposite in="white" in2="overlap" operator="in" result="whiteOverlap"/>
@@ -1145,7 +1200,7 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
       const scaleX = wr.width / CANVAS_W;
       const scaleY = wr.height / CANVAS_H;
       const svgEl = wrap.querySelector('svg');
-      const paths = svgEl ? Array.from(svgEl.querySelectorAll('#layer1 path')).sort((a, b) => parseInt(a.getAttribute('data-idx') || '0', 10) - parseInt(b.getAttribute('data-idx') || '0', 10)) : [];
+      const paths = svgEl ? Array.from(svgEl.querySelectorAll('#layer1 path, #layout-layer1 path')).sort((a, b) => parseInt(a.getAttribute('data-idx') || '0', 10) - parseInt(b.getAttribute('data-idx') || '0', 10)) : [];
       const exportData = window.__layoutConversionDebug?.after || [];
       const svgDebug = paths.map((path) => {
         const i = parseInt(path.getAttribute('data-idx') || '-1', 10);
@@ -1156,14 +1211,14 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
         const posY = m ? parseFloat(m[2]) : 0;
         const r = path.getBoundingClientRect();
         const centerX = (r.x - wr.x + r.width / 2) / scaleX;
-        const centerY = (r.y - wr.y + r.height / 2) / scaleY;
+        const bottomY = (r.y - wr.y + r.height) / scaleY;
         const diffX = exp ? centerX - exp.svgPosX : 0;
-        const diffY = exp ? centerY - exp.svgPosY : 0;
+        const diffY = exp ? bottomY - exp.svgPosY : 0;
         return {
           i,
           pointId: exp?.pointId,
           expected: { x: posX, y: posY },
-          actualCenter: { x: centerX, y: centerY },
+          actualBottom: { x: centerX, y: bottomY },
           diff: { x: diffX, y: diffY }
         };
       });
@@ -1181,7 +1236,7 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
           viewport: { x: firstPathRect.x, y: firstPathRect.y },
           fromCanvasTop: firstPathRect.y - layoutCanvas.y,
           fromWrapperTop: firstPathRect.y - wr.y,
-          centerFromCanvasTop: (firstPathRect.y - layoutCanvas.y + firstPathRect.height / 2)
+          bottomFromCanvasTop: firstPathRect.y - layoutCanvas.y + firstPathRect.height
         } : null
       };
       console.log('[Layout context - SVG view]', layoutContext);
@@ -1202,10 +1257,10 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
             svg: `top:${layoutContext.wrapperOffsetFromCanvas.top.toFixed(0)} left:${layoutContext.wrapperOffsetFromCanvas.left.toFixed(0)}`
           },
           firstElementFromCanvasTop: {
-            font: fontCtx.firstElement?.centerFromCanvasTop.toFixed(1),
-            svg: layoutContext.firstElement?.centerFromCanvasTop.toFixed(1),
+            font: fontCtx.firstElement?.bottomFromCanvasTop.toFixed(1),
+            svg: layoutContext.firstElement?.bottomFromCanvasTop.toFixed(1),
             diff: fontCtx.firstElement && layoutContext.firstElement
-              ? (layoutContext.firstElement.centerFromCanvasTop - fontCtx.firstElement.centerFromCanvasTop).toFixed(1)
+              ? (layoutContext.firstElement.bottomFromCanvasTop - fontCtx.firstElement.bottomFromCanvasTop).toFixed(1)
               : 'n/a'
           }
         };
@@ -1218,8 +1273,8 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
         pointId: r.pointId,
         'exp.x': r.expected.x.toFixed(1),
         'exp.y': r.expected.y.toFixed(1),
-        'act.x': r.actualCenter.x.toFixed(1),
-        'act.y': r.actualCenter.y.toFixed(1),
+        'act.x': r.actualBottom.x.toFixed(1),
+        'act.bottomY': r.actualBottom.y.toFixed(1),
         'diff.x': r.diff.x.toFixed(2),
         'diff.y': r.diff.y.toFixed(2)
       })));
@@ -1248,16 +1303,20 @@ export function initLayout(containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  fetch(`${B}Logo_startD.svg`)
-    .then((r) => {
-      if (!r.ok) throw new Error(`SVG fetch failed: ${r.status}`);
+  Promise.all([
+    fetch(`${B}Logo_startD.svg`).then((r) => {
+      if (!r.ok) throw new Error(`Logo_startD.svg fetch failed: ${r.status}`);
+      return r.text();
+    }),
+    fetch(`${B}Logo_start.svg`).then((r) => {
+      if (!r.ok) throw new Error(`Logo_start.svg fetch failed: ${r.status}`);
       return r.text();
     })
-    .then(async (svgText) => {
-      const parsed = parseSvgPositions(svgText);
-      const svgPositions = parsed.positions;
-      const svgWidth = parsed.svgWidth;
-      const svgHeight = parsed.svgHeight;
+  ])
+    .then(async ([svgTextD, svgTextStart]) => {
+      const parsedD = parseSvgPositions(svgTextD);
+      const parsedStart = parseSvgPositions(svgTextStart, SVG_PATH_TO_POINT_INDEX_LOGO_START);
+      const svgPositions = parsedD.positions;
       const pointIds = POINT_IDS.slice(0, svgPositions.length);
       const numPoints = svgPositions.length;
 
@@ -1275,38 +1334,42 @@ export function initLayout(containerId) {
       }
       await document.fonts.ready;
 
-      const availW = CANVAS_W - 2 * LAYOUT_MARGIN;
-      const availH = CANVAS_H - 2 * LAYOUT_MARGIN;
-      const layoutScale = Math.min(availW / svgWidth, availH / svgHeight);
-      const scaledW = svgWidth * layoutScale;
-      const scaledH = svgHeight * layoutScale;
-      const layoutOffsetX = LAYOUT_MARGIN + (availW - scaledW) / 2;
-      const layoutOffsetY = LAYOUT_MARGIN + (availH - scaledH) / 2;
-
-      const screenX = new Array(numPoints);
-      const screenY = new Array(numPoints);
+      const geomFont = computeLayoutScreenGeometry(parsedD);
+      const geomExport = computeLayoutScreenGeometry(parsedStart);
+      const layoutFeature = '"ss04" 1';
+      const shiftFont = verticalVisualCenterShiftForLayout(
+        geomFont.availCellW,
+        geomFont.availCellH,
+        fontName1,
+        fontName2,
+        pointIds,
+        layoutFeature
+      );
+      const shiftExport = verticalVisualCenterShiftForLayout(
+        geomExport.availCellW,
+        geomExport.availCellH,
+        fontName1,
+        fontName2,
+        pointIds,
+        layoutFeature
+      );
       for (let i = 0; i < numPoints; i++) {
-        screenX[i] = layoutOffsetX + svgPositions[i][0] * layoutScale;
-        screenY[i] = layoutOffsetY + svgPositions[i][1] * layoutScale;
+        geomFont.screenY[i] += shiftFont;
+        geomExport.screenY[i] += shiftExport;
       }
+      const screenX = geomFont.screenX;
+      const screenY = geomFont.screenY;
+      const availCellW = geomFont.availCellW;
+      const availCellH = geomFont.availCellH;
+      const cellHeight = geomFont.cellHeight;
 
       const initDebug = {
         svgPositions: svgPositions.map((p, i) => ({ i, pointId: pointIds[i], raw: p })),
-        layoutScale,
-        layoutOffsetX,
-        layoutOffsetY,
-        screenX: [...screenX],
-        screenY: [...screenY]
+        fontScreen: { screenX: [...screenX], screenY: [...screenY] },
+        exportScreen: { screenX: [...geomExport.screenX], screenY: [...geomExport.screenY] }
       };
       console.log('[Layout init] Position computation (svg→screen):', initDebug);
       if (typeof window !== 'undefined') window.__layoutInitDebug = initDebug;
-
-      const cols = Math.max(4, Math.ceil(Math.sqrt(numPoints)));
-      const rows = Math.ceil(numPoints / cols);
-      const cellWidth = (svgWidth / cols) * layoutScale;
-      const cellHeight = (svgHeight / rows) * layoutScale;
-      const availCellW = cellWidth - CELL_PADDING * 2;
-      const availCellH = cellHeight - CELL_PADDING * 2;
 
       const palette = loadPaletteFromStorage() || PALETTE_COLORS.map(c => [...c]);
       let idx1 = Math.floor(Math.random() * palette.length);
@@ -1335,6 +1398,11 @@ export function initLayout(containerId) {
         availCellW,
         availCellH,
         cellHeight,
+        exportScreenX: geomExport.screenX,
+        exportScreenY: geomExport.screenY,
+        exportAvailCellW: geomExport.availCellW,
+        exportAvailCellH: geomExport.availCellH,
+        exportCellHeight: geomExport.cellHeight,
         layer1Visible: true,
         layer2Visible: true,
         useCutout: false,
@@ -1566,12 +1634,14 @@ export function initLayout(containerId) {
         const btn = document.getElementById('layout-btn-convert');
         if (btn) btn.disabled = true;
         try {
+          state.cutout = false;
           const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
           if (shapes) {
             convertedShapes = shapes;
             krok1ConfirmedForSvg = true;
-            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { cutout: state.cutout, canvasBg: state.canvasBg });
+            displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { cutout: false, canvasBg: state.canvasBg });
             syncExportButtons();
+            updateLayoutFooter(state, stageIndices1, stageIndices2);
           }
         } catch (e) {
           console.error('Convert failed:', e);

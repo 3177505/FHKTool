@@ -13,6 +13,8 @@ html {
   height: 100vh;
   overflow: hidden;
   font-size: 70%;
+  background: $color-page-bg;
+  color: $color-page-text;
 }
 
 body {
@@ -24,6 +26,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: $color-page-bg;
+  color: $color-page-text;
 }
 
 body, body p, body label, body h1, body h2,
@@ -35,17 +39,17 @@ body, body p, body label, body h1, body h2,
 select {
   font: inherit;
   font-size: $font-size-base;
-  color: $color-primary;
+  color: $color-page-text;
   background: none;
   border: none;
-  border-bottom: 1px solid $color-primary;
+  border-bottom: 1px solid $color-border;
   margin: 0;
   padding: 0;
   cursor: pointer;
 }
 
 a {
-  color: $color-primary;
+  color: $color-page-text;
   text-decoration: underline;
 
   &:hover {
@@ -53,7 +57,7 @@ a {
   }
 
   &:visited {
-    color: $color-visited;
+    color: $color-page-text;
   }
 }
 
@@ -63,7 +67,7 @@ button {
   margin: 0;
   padding: 0;
   font: inherit;
-  color: $color-primary;
+  color: $color-page-text;
   text-decoration: underline;
   cursor: pointer;
 
@@ -72,7 +76,7 @@ button {
   }
 
   &.active {
-    color: $color-visited;
+    color: $color-page-text;
   }
 }
 
@@ -84,7 +88,8 @@ button {
   padding: $spacing-sm $spacing-md;
   list-style: none;
   border: 1px solid $color-border;
-  background: $color-bg;
+  background: $color-page-bg;
+  color: $color-page-text;
   z-index: 10;
 
   li {
@@ -128,7 +133,7 @@ button {
   .preview-glyph {
     font-size: min($preview-random-size, $preview-random-size-max);
     line-height: 1;
-    color: $color-primary;
+    color: $color-page-text;
   }
 }
 
@@ -170,7 +175,7 @@ footter {
 }
 
 .overview {
-  color: $color-primary;
+  color: $color-page-text;
   margin-bottom: $spacing-lg;
 }
 
@@ -270,7 +275,7 @@ main {
 
 .btn-sep {
   margin: 0;
-  color: $color-primary;
+  color: $color-page-text;
 }
 
 .view-tabs {
