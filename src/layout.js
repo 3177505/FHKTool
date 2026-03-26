@@ -1,3 +1,5 @@
+import { pairFragmentsIntersectPathD } from './pairCutoutPaths.js';
+
 const CANVAS_W = Math.round(1080 * 297 / 210);
 const CANVAS_H = 1080;
 const POSTER_W = 595;
@@ -12,26 +14,7 @@ const GLYPH_SIZE_FACTOR = 12;
 const D_OFFSET_Y = 0.20;
 const NUM_STAGES = 9;
 
-let cutoutSvgIdSeq = 0;
 let textureRadialIdSeq = 0;
-
-function nextLayoutCutoutSvgIds() {
-  const n = ++cutoutSvgIdSeq;
-  return {
-    g1: `layout-cutout-g1-${n}`,
-    g2: `layout-cutout-g2-${n}`,
-    filt: `layout-cutout-f-${n}`
-  };
-}
-
-function nextPosterCutoutSvgIds() {
-  const n = ++cutoutSvgIdSeq;
-  return {
-    g1: `poster-cutout-g1-${n}`,
-    g2: `poster-cutout-g2-${n}`,
-    filt: `poster-cutout-f-${n}`
-  };
-}
 
 const POINT_IDS = [
   'ID-L1-1', 'ID-L2-1', 'ID-L5-3', 'ID-L4-3', 'ID-L3-4', 'ID-C-3',
@@ -1669,20 +1652,6 @@ function layoutSvgLayersInner(layer1Paths, layer2Paths) {
 </g>`;
 }
 
-function layoutCutoutFilterDefBlock(cid, bgHex, w, h, cutoutAlignRect, layer1Chunk, layer2Chunk) {
-  return `  <g id="${cid.g1}">\n${cutoutAlignRect}${layer1Chunk}</g>
-  <g id="${cid.g2}">\n${cutoutAlignRect}${layer2Chunk}</g>
-  <filter id="${cid.filt}" x="-10%" y="-10%" width="120%" height="120%">
-    <feImage xlink:href="#${cid.g1}" result="l1" width="${w}" height="${h}"/>
-    <feImage xlink:href="#${cid.g2}" result="l2" width="${w}" height="${h}"/>
-    <feComposite in="l1" in2="l2" operator="in" result="overlap"/>
-    <feFlood flood-color="${bgHex}" result="white"/>
-    <feComposite in="white" in2="overlap" operator="in" result="whiteOverlap"/>
-    <feBlend in="l1" in2="l2" mode="multiply" result="combined"/>
-    <feComposite in="whiteOverlap" in2="combined" operator="over" result="final"/>
-  </filter>`;
-}
-
 function layoutSvgStringNormal(layer1Paths, layer2Paths, bgHex, crop) {
   const vx = crop ? crop.vx : 0;
   const vy = crop ? crop.vy : 0;
@@ -2194,7 +2163,7 @@ function logLayoutCutoutComparisonTable(before, after, shapes) {
     ? {
         layoutExportW: shapes.layoutExportW,
         layoutExportH: shapes.layoutExportH,
-        svg_has_cutout_filter: !!shapes.layoutSvg?.includes('layout-cutout-f-'),
+        svg_has_pair_cutout_vector: !!shapes.layoutSvg?.includes('data-layout-pair-cutout'),
         layoutSvg_chars: shapes.layoutSvg?.length ?? 0
       }
     : null;
@@ -2938,21 +2907,20 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
       }
     }
     if (cutIdx.length > 0) {
-      const cutoutAlignRect = `<rect x="0" y="0" width="${CANVAS_W}" height="${CANVAS_H}" fill="none"/>\n`;
-      let defBlocks = '';
-      const overlayRects = [];
+      const stackParts = [];
       for (const ci of cutIdx.sort((x, y) => x - y)) {
-        const cid = nextLayoutCutoutSvgIds();
-        defBlocks += `${layoutCutoutFilterDefBlock(cid, bgHex, CANVAS_W, CANVAS_H, cutoutAlignRect, cellL1[ci], cellL2[ci])}\n`;
-        overlayRects.push(`<rect width="100%" height="100%" fill="none" filter="url(#${cid.filt})"/>`);
+        const holeD = pairFragmentsIntersectPathD(cellL1[ci], cellL2[ci]);
+        const mul = `<g style="mix-blend-mode:multiply">\n${cellL1[ci]}${cellL2[ci]}</g>`;
+        const holePath = holeD
+          ? `\n  <path fill="${escapeXmlAttr(bgHex)}" d="${escapeXmlAttr(holeD)}"/>`
+          : '';
+        stackParts.push(`<g data-layout-pair-cutout="1">\n${mul}${holePath}\n</g>`);
       }
       const layoutSvg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
-<defs>
-${defBlocks}</defs>
 ${layoutSvgLayersInner(base1, base2)}
-${overlayRects.join('\n')}
+${stackParts.join('\n')}
 </svg>`;
       return {
         layoutSvg,
@@ -3048,16 +3016,17 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
 
   const usePosterPairCut = state.posterRandomPairCutout && layer1Paths && layer2Paths;
   if (usePosterPairCut) {
-    const pid = nextPosterCutoutSvgIds();
-    const cutoutAlignRect = `<rect x="0" y="0" width="${POSTER_W}" height="${POSTER_H}" fill="none"/>\n`;
-    const defInner = layoutCutoutFilterDefBlock(pid, bgHex, POSTER_W, POSTER_H, cutoutAlignRect, layer1Paths, layer2Paths);
+    const holeD = pairFragmentsIntersectPathD(layer1Paths, layer2Paths);
+    const holePath = holeD
+      ? `  <path fill="${escapeXmlAttr(bgHex)}" d="${escapeXmlAttr(holeD)}"/>\n`
+      : '';
     return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
-<defs>
-${defInner}
-</defs>
-<rect width="100%" height="100%" fill="none" filter="url(#${pid.filt})"/>
+<g data-poster-pair-cutout="1">
+<g id="layer1">\n${layer1Paths}</g>
+<g id="layer2" style="mix-blend-mode:multiply">\n${layer2Paths}</g>
+${holePath}</g>
 </svg>`;
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
