@@ -8,6 +8,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: 'index.html',
+        filhramonie: 'filhramonie.html',
         testing: 'testing.html',
         forum: 'forum.html',
       },

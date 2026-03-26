@@ -1,24 +1,62 @@
 @use 'var' as *;
 
-body.forum-page {
+.forum-sidebar-hint {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+body.forum-page .forum-palette.layout-palette {
+  display: block;
+  margin: 0;
+}
+
+body.forum-page .forum-palette .layout-palette-list {
+  list-style: disc;
+  margin: 0;
   padding: 0;
-}
-
-.forum-header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: $spacing-lg;
+}
+
+body.forum-page .layout-palette-line {
+  display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
-  gap: $spacing-sm;
+  align-items: center;
+  gap: $spacing-xs;
 }
 
-.forum-palette {
-  margin-top: 0;
-  margin-left: auto;
+body.forum-page .layout-palette-line--buttons {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: $spacing-xs;
 }
 
-body.forum-page main {
+body.forum-page .forum-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: $spacing-lg;
+
+  label:not(.forum-toggle-a4) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: $spacing-xs;
+  }
+
+  label.forum-toggle-a4 {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: $spacing-xs;
+  }
+}
+
+body.forum-page .layout-workspace > main {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   justify-content: center;

@@ -9,6 +9,7 @@ const BOTTOM_MARGIN = 48;
 const CELL_PADDING = 4;
 const FONT_SIZE_LOAD = 200;
 const GLYPH_SIZE_FACTOR = 12;
+const LAYOUT_SHAPES_DISPLAY_SCALE = 1.5;
 const D_OFFSET_Y = 0.20;
 const NUM_STAGES = 9;
 
@@ -38,8 +39,8 @@ const POINT_IDS = [
   'ID-R3-4', 'ID-R4-3', 'ID-R5-3', 'ID-R2-1', 'ID-R1-1'
 ];
 
-const LEFT_CENTER_IDS = new Set(['ID-L1-1', 'ID-L2-1', 'ID-L3-4', 'ID-R3-4', 'ID-R2-1', 'ID-R1-1']);
-const RIGHT_IDS = new Set(['ID-L5-3', 'ID-L4-3', 'ID-C-3', 'ID-R4-3', 'ID-R5-3']);
+const LEFT_CENTER_IDS = new Set(['ID-L1-1', 'ID-L2-1', 'ID-L5-3', 'ID-L4-3', 'ID-L3-4', 'ID-C-3']);
+const RIGHT_IDS = new Set(['ID-R3-4', 'ID-R4-3', 'ID-R5-3', 'ID-R2-1', 'ID-R1-1']);
 
 const SVG_PATH_TO_POINT_INDEX = [3, 0, 1, 2, 5, 7, 6, 10, 9, 8, 4];
 
@@ -47,15 +48,16 @@ const SVG_PATH_TO_POINT_INDEX_LOGO_START = [3, 4, 0, 1, 2, 5, 7, 6, 10, 9, 8];
 
 const PALETTE_COLORS = [
   [0, 0, 0],
-  [11, 24, 148],
-  [218, 56, 50],
-  [109, 214, 76],
-  [249, 221, 74],
-  [164, 164, 164]
+  [247, 208, 217],
+  [249, 232, 102],
+  [91, 177, 102],
+  [249, 165, 75],
+  [237, 109, 46],
+  [232, 81, 71]
 ];
 
-const PALETTE_STORAGE_KEY = 'layout-palette';
-const CANVAS_BG_STORAGE_KEY = 'layout-canvas-bg';
+const PALETTE_STORAGE_KEY = 'filhramonie-palette';
+const CANVAS_BG_STORAGE_KEY = 'filhramonie-canvas-bg';
 const LAYOUT_DEBUG_STORAGE_KEY = 'layoutDebug';
 
 function layoutDebugEnabled() {
@@ -118,11 +120,11 @@ function pickRandomDistinctIndices(count, poolSize) {
 
 function randomOmitPickCount(poolSize) {
   if (poolSize <= 0) return 0;
-  const frac = 0.2 + Math.random() * 0.55;
+  const frac = 0.2 + Math.random() * 0.85;
   return Math.min(poolSize, Math.max(1, Math.round(poolSize * frac)));
 }
 
-const SUBCONTOUR_SCALE_MAX = 2.35;
+const SUBCONTOUR_SCALE_MAX = 1.35;
 
 function randomSubcontourScaleFactor() {
   const lo = 1 / SUBCONTOUR_SCALE_MAX;
@@ -140,8 +142,7 @@ function clearShapeOmitState(state) {
 function clearShapeScaleState(state) {
   state.shapeScaleSubcontours1.clear();
   state.shapeScaleSubcontours2.clear();
-  state.shapeScalePosterSub1.clear();
-  state.shapeScalePosterSub2.clear();
+  state.shapeScalePosterFilh.clear();
 }
 
 function clearShapePairCutoutState(state) {
@@ -149,25 +150,25 @@ function clearShapePairCutoutState(state) {
   state.posterRandomPairCutout = false;
 }
 
-function subcontourLocalScaleSuffix(sub, _pivotX, _py, perSlotMap, slotIdx, subIdx) {
+function subcontourLocalScaleSuffix(sub, pivotX, py, perSlotMap, slotIdx, subIdx) {
   const inner = perSlotMap && perSlotMap.get(slotIdx);
   const sc = inner && inner.get(subIdx);
   const s = sc != null && Number.isFinite(sc) ? sc : 1;
   if (Math.abs(s - 1) < 1e-6) return '';
-  const cx = sub.cx;
-  const cy = sub.cy;
+  const cxRel = sub.cx - pivotX;
+  const cyRel = sub.cy - py;
   const rq = Math.round(s * 1000) / 1000;
-  return ` translate(${cx},${cy}) scale(${rq}) translate(${-cx},${-cy})`;
+  return ` translate(${cxRel},${cyRel}) scale(${rq}) translate(${-cxRel},${-cyRel})`;
 }
 
-function posterSubcontourLocalScaleSuffix(sub, _pivotX, _py, posterScaleMap, si) {
-  const sc = posterScaleMap && posterScaleMap.get(si);
+function filhPosterScaleSuffix(sub, pivotX, py, map, tag, si) {
+  const sc = map.get(`${tag}:${si}`);
   const s = sc != null && Number.isFinite(sc) ? sc : 1;
   if (Math.abs(s - 1) < 1e-6) return '';
-  const cx = sub.cx;
-  const cy = sub.cy;
+  const cxRel = sub.cx - pivotX;
+  const cyRel = sub.cy - py;
   const rq = Math.round(s * 1000) / 1000;
-  return ` translate(${cx},${cy}) scale(${rq}) translate(${-cx},${-cy})`;
+  return ` translate(${cxRel},${cyRel}) scale(${rq}) translate(${-cxRel},${-cyRel})`;
 }
 
 function logNahodneVynechatTvaryDebug(state, pointIds, shapes, pickMeta) {
@@ -266,9 +267,10 @@ function syncCanvasChromeBg(state) {
 function syncTextureBlur(state) {
   if (!state) return;
   const px = Math.max(0, Number(state.textureBlurPx) || 0);
+  const mode = state.textureBlurMode || 'both';
   const blurCss = px > 0 ? `blur(${px}px)` : 'none';
-  const blurLayer1 = px > 0 && state.layer1Visible && !!state.textureBlurLayer1;
-  const blurLayer2 = px > 0 && state.layer2Visible && !!state.textureBlurLayer2;
+  const blurLayer1 = px > 0 && state.layer1Visible && (mode === 'both' || mode === 'layer1');
+  const blurLayer2 = px > 0 && state.layer2Visible && (mode === 'both' || mode === 'layer2');
   const mergedBlur = px > 0 && (blurLayer1 || blurLayer2);
 
   function applyLayerPair(l1, l2) {
@@ -302,18 +304,25 @@ function syncTextureBlur(state) {
   const posterCanvasEl = document.getElementById('poster-canvas');
   const pw = posterCanvasEl?.querySelector('.poster-wrapper');
   if (pw) {
-    const p1Wrap = pw.querySelector('.poster-layer1');
-    const p2Wrap = pw.querySelector('.poster-layer2');
-    if (p1Wrap || p2Wrap) {
-      applyLayerPair(p1Wrap, p2Wrap);
+    const sub1 = pw.querySelectorAll('.poster-sublayer-1');
+    const sub2 = pw.querySelectorAll('.poster-sublayer-2');
+    if (sub1.length || sub2.length) {
+      sub1.forEach((el) => { el.style.filter = blurLayer1 ? blurCss : ''; });
+      sub2.forEach((el) => { el.style.filter = blurLayer2 ? blurCss : ''; });
     } else {
-      const svg = pw.querySelector('svg');
-      const g1 = svg?.querySelector('#layer1');
-      const g2 = svg?.querySelector('#layer2');
-      if (svg && !g1 && !g2) {
-        svg.style.filter = mergedBlur ? blurCss : '';
+      const p1Wrap = pw.querySelector('.poster-layer1');
+      const p2Wrap = pw.querySelector('.poster-layer2');
+      if (p1Wrap || p2Wrap) {
+        applyLayerPair(p1Wrap, p2Wrap);
       } else {
-        applyLayerPair(g1, g2);
+        const svg = pw.querySelector('svg');
+        const g1 = svg?.querySelector('#layer1');
+        const g2 = svg?.querySelector('#layer2');
+        if (svg && !g1 && !g2) {
+          svg.style.filter = mergedBlur ? blurCss : '';
+        } else {
+          applyLayerPair(g1, g2);
+        }
       }
     }
   }
@@ -331,24 +340,11 @@ function mixRgbTowardWhite(rgb, t) {
   ];
 }
 
-function textureFillInnerStopPct(amount) {
+function textureRadialParamsFromAmount(amount, r, g, b) {
   const t = Math.min(1, Math.max(0, amount) / 16);
-  return Math.round(88 - t * 30);
-}
-
-function textureFillEdgeAndLit(amount, r, g, b, invert) {
-  const t = Math.min(1, Math.max(0, amount) / 16);
-  const lit = mixRgbTowardWhite([r, g, b], t);
-  const er = r;
-  const eg = g;
-  const eb = b;
-  const lr = lit[0];
-  const lg = lit[1];
-  const lb = lit[2];
-  if (invert) {
-    return { c0r: er, c0g: eg, c0b: eb, c1r: lr, c1g: lg, c1b: lb };
-  }
-  return { c0r: lr, c0g: lg, c0b: lb, c1r: er, c1g: eg, c1b: eb };
+  const [cr, cg, cb] = mixRgbTowardWhite([r, g, b], t * 0.9);
+  const innerStop = Math.round(28 + (1 - t) * 42);
+  return { cr, cg, cb, innerStop, edgeR: r, edgeG: g, edgeB: b };
 }
 
 function parseSvgFillToRgb(fill) {
@@ -363,217 +359,50 @@ function parseSvgFillToRgb(fill) {
   return [0, 0, 0];
 }
 
-function resetSvgTextureFill(svgEl) {
+function resetSvgTextureRadial(svgEl) {
   const defs = svgEl.querySelector('defs');
-  if (defs) defs.querySelectorAll('[data-texfill="1"]').forEach((n) => n.remove());
-  svgEl.querySelectorAll('path[data-tex-orig-fill]').forEach((path) => {
-    path.setAttribute('fill', path.getAttribute('data-tex-orig-fill') || '#000000');
-    path.removeAttribute('data-tex-orig-fill');
+  if (defs) defs.querySelectorAll('[data-texrad="1"]').forEach((n) => n.remove());
+  svgEl.querySelectorAll('#layer1 path[data-texrad-base], #layer2 path[data-texrad-base]').forEach((path) => {
+    path.setAttribute('fill', path.getAttribute('data-texrad-base') || '#000000');
+    path.removeAttribute('data-texrad-base');
   });
 }
 
-function textureFillOptsForLayer(state, layerNum) {
-  if (layerNum === 1) {
-    return {
-      kind: state.textureGradientKind1 === 'linear' ? 'linear' : 'radial',
-      angle: Number(state.textureGradientAngle1) || 0,
-      invert: !!state.textureGradientInvert1
-    };
-  }
-  return {
-    kind: state.textureGradientKind2 === 'linear' ? 'linear' : 'radial',
-    angle: Number(state.textureGradientAngle2) || 0,
-    invert: !!state.textureGradientInvert2
-  };
-}
-
-function createSvgTextureGradient(defs, gradId, gradOpts, c0, c1, innerStopPct) {
-  const linear = gradOpts.kind === 'linear';
-  const angle = Number(gradOpts.angle) || 0;
-  if (!linear) {
-    const rg = document.createElementNS(SVG_NS, 'radialGradient');
-    rg.setAttribute('id', gradId);
-    rg.setAttribute('cx', '50%');
-    rg.setAttribute('cy', '50%');
-    rg.setAttribute('r', '100%');
-    rg.setAttribute('gradientUnits', 'objectBoundingBox');
-    rg.setAttribute('data-texfill', '1');
-    const s0 = document.createElementNS(SVG_NS, 'stop');
-    s0.setAttribute('offset', '0%');
-    s0.setAttribute('stop-color', `rgb(${c0.r},${c0.g},${c0.b})`);
-    const s1 = document.createElementNS(SVG_NS, 'stop');
-    s1.setAttribute('offset', `${innerStopPct}%`);
-    s1.setAttribute('stop-color', `rgb(${c1.r},${c1.g},${c1.b})`);
-    const s2 = document.createElementNS(SVG_NS, 'stop');
-    s2.setAttribute('offset', '100%');
-    s2.setAttribute('stop-color', `rgb(${c1.r},${c1.g},${c1.b})`);
-    rg.appendChild(s0);
-    rg.appendChild(s1);
-    rg.appendChild(s2);
-    defs.appendChild(rg);
-    return;
-  }
-  const lg = document.createElementNS(SVG_NS, 'linearGradient');
-  lg.setAttribute('id', gradId);
-  lg.setAttribute('x1', '0');
-  lg.setAttribute('y1', '0');
-  lg.setAttribute('x2', '1');
-  lg.setAttribute('y2', '0');
-  lg.setAttribute('gradientUnits', 'objectBoundingBox');
-  lg.setAttribute('gradientTransform', `rotate(${angle} 0.5 0.5)`);
-  lg.setAttribute('data-texfill', '1');
-  const t0 = document.createElementNS(SVG_NS, 'stop');
-  t0.setAttribute('offset', '0%');
-  t0.setAttribute('stop-color', `rgb(${c0.r},${c0.g},${c0.b})`);
-  const t1 = document.createElementNS(SVG_NS, 'stop');
-  t1.setAttribute('offset', '100%');
-  t1.setAttribute('stop-color', `rgb(${c1.r},${c1.g},${c1.b})`);
-  lg.appendChild(t0);
-  lg.appendChild(t1);
-  defs.appendChild(lg);
-}
-
-function texturePatternOptsForLayer(state, layerNum) {
-  if (layerNum === 1) {
-    return {
-      enabled: !!state.texturePatternEnabled1,
-      kind: state.texturePatternKind1 === 'bitmap' ? 'bitmap' : 'stripes',
-      angle: Number(state.texturePatternStripesAngle1) || 0,
-      period: Math.max(4, Number(state.texturePatternStripesPeriod1) || 14),
-      ratio: (() => {
-        const x = Number(state.texturePatternStripesRatio1);
-        return Number.isFinite(x) ? Math.min(0.92, Math.max(0.08, x)) : 0.45;
-      })(),
-      bitmapUrl: state.texturePatternBitmapUrl1 || '',
-      bitmapScale: Number(state.texturePatternBitmapScale1) || 100,
-      bitmapPerShape: !!state.texturePatternBitmapPerShape1
-    };
-  }
-  return {
-    enabled: !!state.texturePatternEnabled2,
-    kind: state.texturePatternKind2 === 'bitmap' ? 'bitmap' : 'stripes',
-    angle: Number(state.texturePatternStripesAngle2) || 0,
-    period: Math.max(4, Number(state.texturePatternStripesPeriod2) || 14),
-    ratio: (() => {
-      const x = Number(state.texturePatternStripesRatio2);
-      return Number.isFinite(x) ? Math.min(0.92, Math.max(0.08, x)) : 0.45;
-    })(),
-    bitmapUrl: state.texturePatternBitmapUrl2 || '',
-    bitmapScale: Number(state.texturePatternBitmapScale2) || 100,
-    bitmapPerShape: !!state.texturePatternBitmapPerShape2
-  };
-}
-
-function layerPatternShouldApply(state, layerNum) {
-  const pat = texturePatternOptsForLayer(state, layerNum);
-  if (!pat.enabled) return false;
-  if (pat.kind === 'bitmap') return !!pat.bitmapUrl;
-  return true;
-}
-
-function applyStripePatternToSvgPaths(defs, paths, pat, r, g, b) {
-  const period = Math.max(4, Math.min(160, pat.period || 14));
-  const ratio = Math.min(0.92, Math.max(0.08, Number(pat.ratio) || 0.45));
-  const stripeW = Math.max(1, period * ratio);
-  const angle = Number(pat.angle) || 0;
-  const patId = `texpat-${++textureRadialIdSeq}`;
-  const p = document.createElementNS(SVG_NS, 'pattern');
-  p.setAttribute('id', patId);
-  p.setAttribute('patternUnits', 'userSpaceOnUse');
-  p.setAttribute('width', String(period));
-  p.setAttribute('height', String(period));
-  p.setAttribute('patternTransform', `rotate(${angle} ${period / 2} ${period / 2})`);
-  p.setAttribute('data-texfill', '1');
-  const rect = document.createElementNS(SVG_NS, 'rect');
-  rect.setAttribute('x', '0');
-  rect.setAttribute('y', String(-period));
-  rect.setAttribute('width', String(stripeW));
-  rect.setAttribute('height', String(period * 3));
-  rect.setAttribute('fill', `rgb(${r},${g},${b})`);
-  p.appendChild(rect);
-  defs.appendChild(p);
-  paths.forEach((path) => {
-    const rawFill = path.getAttribute('fill') || '#000000';
-    if (rawFill.includes('url(')) return;
-    path.setAttribute('data-tex-orig-fill', rawFill);
-    path.setAttribute('fill', `url(#${patId})`);
-  });
-}
-
-function applyBitmapPatternToSvgPaths(defs, paths, pat) {
-  const sc = Math.max(0.25, Math.min(4, (Number(pat.bitmapScale) || 100) / 100));
-  const w = Math.round(96 * sc);
-  const h = Math.round(96 * sc);
-  if (pat.bitmapPerShape) {
-    const iw = 1 / sc;
-    const io = (1 - iw) / 2;
-    paths.forEach((path) => {
-      const rawFill = path.getAttribute('fill') || '#000000';
-      if (rawFill.includes('url(')) return;
-      path.setAttribute('data-tex-orig-fill', rawFill);
-      const patId = `texpat-${++textureRadialIdSeq}`;
-      const p = document.createElementNS(SVG_NS, 'pattern');
-      p.setAttribute('id', patId);
-      p.setAttribute('patternUnits', 'objectBoundingBox');
-      p.setAttribute('patternContentUnits', 'objectBoundingBox');
-      p.setAttribute('width', '1');
-      p.setAttribute('height', '1');
-      p.setAttribute('data-texfill', '1');
-      const img = document.createElementNS(SVG_NS, 'image');
-      img.setAttribute('href', pat.bitmapUrl);
-      img.setAttribute('x', String(io));
-      img.setAttribute('y', String(io));
-      img.setAttribute('width', String(iw));
-      img.setAttribute('height', String(iw));
-      img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
-      p.appendChild(img);
-      defs.appendChild(p);
-      path.setAttribute('fill', `url(#${patId})`);
-    });
-    return;
-  }
-  const patId = `texpat-${++textureRadialIdSeq}`;
-  const p = document.createElementNS(SVG_NS, 'pattern');
-  p.setAttribute('id', patId);
-  p.setAttribute('patternUnits', 'userSpaceOnUse');
-  p.setAttribute('width', String(w));
-  p.setAttribute('height', String(h));
-  p.setAttribute('data-texfill', '1');
-  const img = document.createElementNS(SVG_NS, 'image');
-  img.setAttribute('href', pat.bitmapUrl);
-  img.setAttribute('width', String(w));
-  img.setAttribute('height', String(h));
-  img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
-  p.appendChild(img);
-  defs.appendChild(p);
-  paths.forEach((path) => {
-    const rawFill = path.getAttribute('fill') || '#000000';
-    if (rawFill.includes('url(')) return;
-    path.setAttribute('data-tex-orig-fill', rawFill);
-    path.setAttribute('fill', `url(#${patId})`);
-  });
-}
-
-function applyTextureFillToSvgPaths(defs, paths, fillOpts, amount) {
-  const amt = Math.max(0, Number(amount) || 0);
-  const innerStop = textureFillInnerStopPct(amt);
+function applyRadialToSvgPaths(defs, paths, amount) {
   paths.forEach((path) => {
     const rawFill = path.getAttribute('fill') || '#000000';
     if (rawFill.includes('url(')) return;
     const [r, g, b] = parseSvgFillToRgb(rawFill);
-    path.setAttribute('data-tex-orig-fill', rawFill);
-    const st = textureFillEdgeAndLit(amt, r, g, b, !!fillOpts.invert);
-    const c0 = { r: st.c0r, g: st.c0g, b: st.c0b };
-    const c1 = { r: st.c1r, g: st.c1g, b: st.c1b };
-    const gradId = `texgrad-${++textureRadialIdSeq}`;
-    const gradOpts = { kind: fillOpts.kind, angle: fillOpts.angle };
-    createSvgTextureGradient(defs, gradId, gradOpts, c0, c1, innerStop);
-    path.setAttribute('fill', `url(#${gradId})`);
+    const { cr, cg, cb, innerStop, edgeR, edgeG, edgeB } = textureRadialParamsFromAmount(amount, r, g, b);
+    path.setAttribute('data-texrad-base', rawFill);
+    const id = `texrad-${++textureRadialIdSeq}`;
+    const rg = document.createElementNS(SVG_NS, 'radialGradient');
+    rg.setAttribute('id', id);
+    rg.setAttribute('cx', '50%');
+    rg.setAttribute('cy', '50%');
+    rg.setAttribute('r', '65%');
+    rg.setAttribute('gradientUnits', 'objectBoundingBox');
+    rg.setAttribute('data-texrad', '1');
+    const s0 = document.createElementNS(SVG_NS, 'stop');
+    s0.setAttribute('offset', '0%');
+    s0.setAttribute('stop-color', `rgb(${cr},${cg},${cb})`);
+    const s1 = document.createElementNS(SVG_NS, 'stop');
+    s1.setAttribute('offset', `${innerStop}%`);
+    s1.setAttribute('stop-color', `rgb(${edgeR},${edgeG},${edgeB})`);
+    const s2 = document.createElementNS(SVG_NS, 'stop');
+    s2.setAttribute('offset', '100%');
+    s2.setAttribute('stop-color', `rgb(${edgeR},${edgeG},${edgeB})`);
+    rg.appendChild(s0);
+    rg.appendChild(s1);
+    rg.appendChild(s2);
+    defs.appendChild(rg);
+    path.setAttribute('fill', `url(#${id})`);
   });
 }
 
-function syncTextureFillSvgDoc(svgEl, state) {
-  resetSvgTextureFill(svgEl);
+function syncTextureRadialSvgInDoc(svgEl, amount, active1, active2) {
+  resetSvgTextureRadial(svgEl);
+  if (!amount || (!active1 && !active2)) return;
   let defs = svgEl.querySelector('defs');
   if (!defs) {
     defs = document.createElementNS(SVG_NS, 'defs');
@@ -581,61 +410,11 @@ function syncTextureFillSvgDoc(svgEl, state) {
   }
   const g1 = svgEl.querySelector('#layer1');
   const g2 = svgEl.querySelector('#layer2');
-  const proc = (g, layerNum) => {
-    if (!g) return;
-    const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
-    if (!visL) return;
-    const paths = g.querySelectorAll('path');
-    if (!paths.length) return;
-    const [pr, pg, pb] = layerNum === 1 ? state.logo1Color : state.logo2Color;
-    if (layerPatternShouldApply(state, layerNum)) {
-      const pat = texturePatternOptsForLayer(state, layerNum);
-      if (pat.kind === 'stripes') {
-        applyStripePatternToSvgPaths(defs, paths, pat, pr, pg, pb);
-      } else {
-        applyBitmapPatternToSvgPaths(defs, paths, pat);
-      }
-      return;
-    }
-    const activeGrad = layerNum === 1 ? !!state.textureFillLayer1 : !!state.textureFillLayer2;
-    const amt = Math.max(0, Number(layerNum === 1 ? state.textureRadialAmount1 : state.textureRadialAmount2) || 0);
-    if (activeGrad && amt > 0) {
-      applyTextureFillToSvgPaths(defs, paths, textureFillOptsForLayer(state, layerNum), amt);
-    }
-  };
-  proc(g1, 1);
-  proc(g2, 2);
+  if (active1 && g1) applyRadialToSvgPaths(defs, g1.querySelectorAll('path'), amount);
+  if (active2 && g2) applyRadialToSvgPaths(defs, g2.querySelectorAll('path'), amount);
 }
 
-function syncTextureFillLayerSvgRoot(svgRoot, state, layerNum) {
-  resetSvgTextureFill(svgRoot);
-  const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
-  if (!visL) return;
-  const paths = svgRoot.querySelectorAll('path');
-  if (!paths.length) return;
-  let defs = svgRoot.querySelector('defs');
-  if (!defs) {
-    defs = document.createElementNS(SVG_NS, 'defs');
-    svgRoot.insertBefore(defs, svgRoot.firstChild);
-  }
-  const [pr, pg, pb] = layerNum === 1 ? state.logo1Color : state.logo2Color;
-  if (layerPatternShouldApply(state, layerNum)) {
-    const pat = texturePatternOptsForLayer(state, layerNum);
-    if (pat.kind === 'stripes') {
-      applyStripePatternToSvgPaths(defs, paths, pat, pr, pg, pb);
-    } else {
-      applyBitmapPatternToSvgPaths(defs, paths, pat);
-    }
-    return;
-  }
-  const activeGrad = layerNum === 1 ? !!state.textureFillLayer1 : !!state.textureFillLayer2;
-  const amt = Math.max(0, Number(layerNum === 1 ? state.textureRadialAmount1 : state.textureRadialAmount2) || 0);
-  if (activeGrad && amt > 0) {
-    applyTextureFillToSvgPaths(defs, paths, textureFillOptsForLayer(state, layerNum), amt);
-  }
-}
-
-function setLayerCssTextureGradientOnly(layerEl, rgba, amount, active, fillOpts) {
+function setLayerRadialGradient(layerEl, rgba, amount, active) {
   if (!layerEl) return;
   const spans = layerEl.querySelectorAll('span');
   const [r, g, b] = rgba;
@@ -644,409 +423,60 @@ function setLayerCssTextureGradientOnly(layerEl, rgba, amount, active, fillOpts)
     spans.forEach((span) => {
       span.style.color = `rgb(${r},${g},${b})`;
       span.style.backgroundImage = '';
-      span.style.removeProperty('background-size');
-      span.style.removeProperty('background-repeat');
-      span.style.removeProperty('background-position');
       span.style.removeProperty('background-clip');
       span.style.removeProperty('-webkit-background-clip');
       span.style.removeProperty('-webkit-text-fill-color');
     });
     return;
   }
-  const st = textureFillEdgeAndLit(amt, r, g, b, !!fillOpts.invert);
-  const innerStop = textureFillInnerStopPct(amt);
-  const linear = fillOpts.kind === 'linear';
-  const angle = Number(fillOpts.angle) || 0;
-  const bg = linear
-    ? `linear-gradient(${angle}deg, rgb(${st.c0r},${st.c0g},${st.c0b}), rgb(${st.c1r},${st.c1g},${st.c1b}))`
-    : `radial-gradient(ellipse farthest-corner at 50% 50%, rgb(${st.c0r},${st.c0g},${st.c0b}) 0%, rgb(${st.c1r},${st.c1g},${st.c1b}) ${innerStop}%, rgb(${st.c1r},${st.c1g},${st.c1b}) 100%)`;
+  const { cr, cg, cb, innerStop, edgeR, edgeG, edgeB } = textureRadialParamsFromAmount(amt, r, g, b);
+  const bg = `radial-gradient(circle at 50% 50%, rgb(${cr},${cg},${cb}) 0%, rgb(${edgeR},${edgeG},${edgeB}) ${innerStop}%, rgb(${edgeR},${edgeG},${edgeB}) 100%)`;
   spans.forEach((span) => {
     span.style.color = 'transparent';
     span.style.setProperty('-webkit-text-fill-color', 'transparent');
     span.style.backgroundImage = bg;
-    span.style.removeProperty('background-size');
-    span.style.removeProperty('background-repeat');
-    span.style.removeProperty('background-position');
     span.style.setProperty('background-clip', 'text');
     span.style.setProperty('-webkit-background-clip', 'text');
   });
 }
 
-function syncLayerCssSpanFill(layerEl, state, layerNum) {
-  if (!layerEl) return;
-  const spans = layerEl.querySelectorAll('span');
-  const rgba = layerNum === 1 ? state.logo1Color : state.logo2Color;
-  const [r, g, b] = rgba;
-  const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
-  if (!visL) return;
-
-  const solidReset = () => {
-    spans.forEach((span) => {
-      span.style.color = `rgb(${r},${g},${b})`;
-      span.style.backgroundImage = '';
-      span.style.removeProperty('background-size');
-      span.style.removeProperty('background-repeat');
-      span.style.removeProperty('background-position');
-      span.style.removeProperty('background-clip');
-      span.style.removeProperty('-webkit-background-clip');
-      span.style.removeProperty('-webkit-text-fill-color');
-    });
-  };
-
-  if (layerPatternShouldApply(state, layerNum)) {
-    const pat = texturePatternOptsForLayer(state, layerNum);
-    if (pat.kind === 'stripes') {
-      const period = Math.max(4, Math.min(160, pat.period || 14));
-      const ratio = Math.min(0.92, Math.max(0.08, Number(pat.ratio) || 0.45));
-      const stripePx = Math.max(1, period * ratio);
-      const gapPx = Math.max(1, period - stripePx);
-      const ang = Number(pat.angle) || 0;
-      const bg = `repeating-linear-gradient(${ang}deg, rgb(${r},${g},${b}) 0 ${stripePx}px, transparent ${stripePx}px ${stripePx + gapPx}px)`;
-      spans.forEach((span) => {
-        span.style.color = 'transparent';
-        span.style.setProperty('-webkit-text-fill-color', 'transparent');
-        span.style.backgroundImage = bg;
-        span.style.removeProperty('background-size');
-        span.style.removeProperty('background-repeat');
-        span.style.backgroundPosition = 'center';
-        span.style.setProperty('background-clip', 'text');
-        span.style.setProperty('-webkit-background-clip', 'text');
-      });
-      return;
-    }
-    spans.forEach((span) => {
-      span.style.color = 'transparent';
-      span.style.setProperty('-webkit-text-fill-color', 'transparent');
-      span.style.backgroundImage = `url(${JSON.stringify(pat.bitmapUrl)})`;
-      if (pat.bitmapPerShape) {
-        span.style.backgroundSize = 'cover';
-        span.style.backgroundRepeat = 'no-repeat';
-      } else {
-        const tilePx = Math.max(24, Math.min(240, Math.round((Number(pat.bitmapScale) || 100) * 0.96)));
-        span.style.backgroundSize = `${tilePx}px ${tilePx}px`;
-        span.style.backgroundRepeat = 'repeat';
-      }
-      span.style.backgroundPosition = 'center';
-      span.style.setProperty('background-clip', 'text');
-      span.style.setProperty('-webkit-background-clip', 'text');
-    });
-    return;
-  }
-
-  const activeGrad = layerNum === 1 ? !!state.textureFillLayer1 : !!state.textureFillLayer2;
-  const amt = Math.max(0, Number(layerNum === 1 ? state.textureRadialAmount1 : state.textureRadialAmount2) || 0);
-  if (!activeGrad || !amt) {
-    solidReset();
-    return;
-  }
-  setLayerCssTextureGradientOnly(layerEl, rgba, amt, true, textureFillOptsForLayer(state, layerNum));
-}
-
 function syncTextureRadial(state) {
   if (!state) return;
+  const mode = state.textureRadialMode || 'both';
+  const amt = Math.max(0, Number(state.textureRadialAmount) || 0);
+  const active1 = (mode === 'both' || mode === 'layer1') && state.layer1Visible;
+  const active2 = (mode === 'both' || mode === 'layer2') && state.layer2Visible;
 
   const layoutCanvasEl = document.getElementById('layout-canvas');
   const lw = layoutCanvasEl?.querySelector('.layout-wrapper');
   if (lw && lw.tagName !== 'CANVAS') {
-    const svgL1 = lw.querySelector('.layout-layer1 svg.layout-layer-svg');
-    const svgL2 = lw.querySelector('.layout-layer2 svg.layout-layer-svg');
-    if (svgL1 || svgL2) {
-      if (svgL1) syncTextureFillLayerSvgRoot(svgL1, state, 1);
-      if (svgL2) syncTextureFillLayerSvgRoot(svgL2, state, 2);
+    const svg = lw.querySelector('svg');
+    if (svg?.querySelector('#layer1')) {
+      syncTextureRadialSvgInDoc(svg, amt, active1, active2);
     } else {
-      const svg = lw.querySelector('svg');
-      if (svg?.querySelector('#layer1')) {
-        syncTextureFillSvgDoc(svg, state);
-      } else {
-        syncLayerCssSpanFill(lw.querySelector('.layout-layer1'), state, 1);
-        syncLayerCssSpanFill(lw.querySelector('.layout-layer2'), state, 2);
-      }
+      setLayerRadialGradient(lw.querySelector('.layout-layer1'), state.logo1Color, amt, active1);
+      setLayerRadialGradient(lw.querySelector('.layout-layer2'), state.logo2Color, amt, active2);
     }
   }
 
   const posterCanvasEl = document.getElementById('poster-canvas');
   const pw = posterCanvasEl?.querySelector('.poster-wrapper');
   if (pw) {
-    const svgP1 = pw.querySelector('.poster-layer1 svg.layout-layer-svg');
-    const svgP2 = pw.querySelector('.poster-layer2 svg.layout-layer-svg');
-    if (svgP1 || svgP2) {
-      if (svgP1) syncTextureFillLayerSvgRoot(svgP1, state, 1);
-      if (svgP2) syncTextureFillLayerSvgRoot(svgP2, state, 2);
+    const svg = pw.querySelector('svg');
+    if (svg?.querySelector('#layer1')) {
+      syncTextureRadialSvgInDoc(svg, amt, active1, active2);
     } else {
-      const svg = pw.querySelector('svg');
-      if (svg?.querySelector('#layer1')) {
-        syncTextureFillSvgDoc(svg, state);
+      const subs1 = pw.querySelectorAll('.poster-sublayer-1');
+      const subs2 = pw.querySelectorAll('.poster-sublayer-2');
+      if (subs1.length || subs2.length) {
+        subs1.forEach((el) => setLayerRadialGradient(el, state.logo1Color, amt, active1));
+        subs2.forEach((el) => setLayerRadialGradient(el, state.logo2Color, amt, active2));
       } else {
-        syncLayerCssSpanFill(pw.querySelector('.poster-layer1'), state, 1);
-        syncLayerCssSpanFill(pw.querySelector('.poster-layer2'), state, 2);
+        setLayerRadialGradient(pw.querySelector('.poster-layer1'), state.logo1Color, amt, active1);
+        setLayerRadialGradient(pw.querySelector('.poster-layer2'), state.logo2Color, amt, active2);
       }
     }
   }
-}
-
-function textureGradientSliderBounds() {
-  const ref = typeof document !== 'undefined' ? document.getElementById('layout-texture-radial-amount-1') : null;
-  const max = Number(ref?.max) || 16;
-  const min = Number(ref?.min) || 0;
-  const step = Number(ref?.step) || 1;
-  const steps = Math.max(1, Math.floor((max - min) / step) + 1);
-  return { max, min, step, steps };
-}
-
-function randomTextureGradientAmountNonZero() {
-  const { min, step, steps } = textureGradientSliderBounds();
-  if (steps <= 1) return min;
-  const idx = 1 + Math.floor(Math.random() * (steps - 1));
-  return min + idx * step;
-}
-
-function applyRandomTextureBlur(state) {
-  const v1 = state.layer1Visible;
-  const v2 = state.layer2Visible;
-  if (v1 && v2) {
-    if (Math.random() < 0.5) {
-      state.textureBlurLayer1 = true;
-      state.textureBlurLayer2 = false;
-    } else {
-      state.textureBlurLayer1 = false;
-      state.textureBlurLayer2 = true;
-    }
-  } else {
-    state.textureBlurLayer1 = v1;
-    state.textureBlurLayer2 = v2;
-  }
-  const blurRangeEl = document.getElementById('layout-texture-blur-amount');
-  const max = Number(blurRangeEl?.max) || 16;
-  const min = Number(blurRangeEl?.min) || 0;
-  const step = Number(blurRangeEl?.step) || 1;
-  const steps = Math.floor((max - min) / step) + 1;
-  state.textureBlurPx = min + Math.floor(Math.random() * steps) * step;
-  if (blurRangeEl) blurRangeEl.value = String(state.textureBlurPx);
-  const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
-  if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx} px`;
-  const blurL1 = document.getElementById('layout-texture-blur-l1');
-  const blurL2 = document.getElementById('layout-texture-blur-l2');
-  if (blurL1) blurL1.checked = !!state.textureBlurLayer1;
-  if (blurL2) blurL2.checked = !!state.textureBlurLayer2;
-  syncTextureBlur(state);
-}
-
-function applyRandomTextureGradient(state) {
-  const v1 = state.layer1Visible;
-  const v2 = state.layer2Visible;
-  state.textureFillLayer1 = !!v1;
-  state.textureFillLayer2 = !!v2;
-  if (v1) {
-    state.textureRadialAmount1 = randomTextureGradientAmountNonZero();
-  } else {
-    state.textureRadialAmount1 = 0;
-  }
-  if (v2) {
-    state.textureRadialAmount2 = randomTextureGradientAmountNonZero();
-  } else {
-    state.textureRadialAmount2 = 0;
-  }
-  state.textureGradientKind1 = Math.random() < 0.5 ? 'radial' : 'linear';
-  state.textureGradientKind2 = Math.random() < 0.5 ? 'radial' : 'linear';
-  state.textureGradientAngle1 = Math.floor(Math.random() * 24) * 15;
-  state.textureGradientAngle2 = Math.floor(Math.random() * 24) * 15;
-  state.textureGradientInvert1 = Math.random() < 0.5;
-  state.textureGradientInvert2 = Math.random() < 0.5;
-  syncTextureGradientControlsFromState(state);
-  syncTextureRadial(state);
-}
-
-function rollTexturePatternLayer(state, ln) {
-  const period = 6 + Math.floor(Math.random() * 23) * 2;
-  const ratio = (12 + Math.floor(Math.random() * 58)) / 100;
-  const angle = Math.floor(Math.random() * 24) * 15;
-  const scale = 40 + Math.floor(Math.random() * 15) * 10;
-  if (ln === 1) {
-    state.texturePatternStripesPeriod1 = period;
-    state.texturePatternStripesRatio1 = ratio;
-    state.texturePatternStripesAngle1 = angle;
-    state.texturePatternBitmapScale1 = Math.min(200, Math.max(25, scale));
-    let k = Math.random() < 0.62 ? 'stripes' : 'bitmap';
-    if (k === 'bitmap' && !state.texturePatternBitmapUrl1) k = 'stripes';
-    state.texturePatternKind1 = k;
-  } else {
-    state.texturePatternStripesPeriod2 = period;
-    state.texturePatternStripesRatio2 = ratio;
-    state.texturePatternStripesAngle2 = angle;
-    state.texturePatternBitmapScale2 = Math.min(200, Math.max(25, scale));
-    let k = Math.random() < 0.62 ? 'stripes' : 'bitmap';
-    if (k === 'bitmap' && !state.texturePatternBitmapUrl2) k = 'stripes';
-    state.texturePatternKind2 = k;
-  }
-}
-
-function applyRandomTexturePattern(state) {
-  const v1 = !!state.layer1Visible;
-  const v2 = !!state.layer2Visible;
-  let target = 'both';
-  if (v1 && v2) {
-    const t = Math.random();
-    if (t < 1 / 3) target = '1';
-    else if (t < 2 / 3) target = '2';
-    else target = 'both';
-  } else if (v1) target = '1';
-  else if (v2) target = '2';
-
-  if (target === '1') {
-    state.texturePatternEnabled1 = true;
-    state.texturePatternEnabled2 = false;
-  } else if (target === '2') {
-    state.texturePatternEnabled1 = false;
-    state.texturePatternEnabled2 = true;
-  } else {
-    state.texturePatternEnabled1 = v1;
-    state.texturePatternEnabled2 = v2;
-  }
-
-  if (state.texturePatternEnabled1) rollTexturePatternLayer(state, 1);
-  if (state.texturePatternEnabled2) rollTexturePatternLayer(state, 2);
-  syncTexturePatternControlsFromState(state);
-  syncTextureRadial(state);
-}
-
-function applyRandomTextureEffectsCombo(state) {
-  applyRandomTextureBlur(state);
-  applyRandomTextureGradient(state);
-  applyRandomTexturePattern(state);
-}
-
-function syncTextureGradientControlsFromState(state) {
-  const radialRangeEl1 = document.getElementById('layout-texture-radial-amount-1');
-  const radialLabelEl1 = document.getElementById('layout-texture-radial-amount-1-label');
-  if (radialRangeEl1) radialRangeEl1.value = String(state.textureRadialAmount1 ?? 0);
-  if (radialLabelEl1) radialLabelEl1.textContent = `V1 gradient: ${state.textureRadialAmount1 ?? 0}`;
-  const radialRangeEl2 = document.getElementById('layout-texture-radial-amount-2');
-  const radialLabelEl2 = document.getElementById('layout-texture-radial-amount-2-label');
-  if (radialRangeEl2) radialRangeEl2.value = String(state.textureRadialAmount2 ?? 0);
-  if (radialLabelEl2) radialLabelEl2.textContent = `V2 gradient: ${state.textureRadialAmount2 ?? 0}`;
-  const fillL1 = document.getElementById('layout-texture-fill-l1');
-  const fillL2 = document.getElementById('layout-texture-fill-l2');
-  if (fillL1) fillL1.checked = !!state.textureFillLayer1;
-  if (fillL2) fillL2.checked = !!state.textureFillLayer2;
-  const g1r = document.getElementById('layout-texture-grad-1-radial');
-  const g1l = document.getElementById('layout-texture-grad-1-linear');
-  if (g1r && g1l) {
-    const lin = state.textureGradientKind1 === 'linear';
-    g1r.checked = !lin;
-    g1l.checked = lin;
-  }
-  const g2r = document.getElementById('layout-texture-grad-2-radial');
-  const g2l = document.getElementById('layout-texture-grad-2-linear');
-  if (g2r && g2l) {
-    const lin2 = state.textureGradientKind2 === 'linear';
-    g2r.checked = !lin2;
-    g2l.checked = lin2;
-  }
-  const linAng1 = document.getElementById('layout-texture-linear-angle-1');
-  const linAngLabel1 = document.getElementById('layout-texture-linear-angle-1-label');
-  if (linAng1) linAng1.value = String(state.textureGradientAngle1 ?? 90);
-  if (linAngLabel1) linAngLabel1.textContent = `Směr: ${state.textureGradientAngle1 ?? 90}°`;
-  const linAng2 = document.getElementById('layout-texture-linear-angle-2');
-  const linAngLabel2 = document.getElementById('layout-texture-linear-angle-2-label');
-  if (linAng2) linAng2.value = String(state.textureGradientAngle2 ?? 90);
-  if (linAngLabel2) linAngLabel2.textContent = `Směr: ${state.textureGradientAngle2 ?? 90}°`;
-  syncTextureSubpanelVisibility(state);
-}
-
-function syncTextureSubpanelVisibility(state) {
-  const gradLin1 = document.getElementById('layout-tex-grad-linear-wrap-1');
-  const gradRad1 = document.getElementById('layout-tex-grad-radial-wrap-1');
-  const lin1 = state.textureGradientKind1 === 'linear';
-  if (gradLin1) gradLin1.hidden = !lin1;
-  if (gradRad1) gradRad1.hidden = lin1;
-  const gradLin2 = document.getElementById('layout-tex-grad-linear-wrap-2');
-  const gradRad2 = document.getElementById('layout-tex-grad-radial-wrap-2');
-  const lin2 = state.textureGradientKind2 === 'linear';
-  if (gradLin2) gradLin2.hidden = !lin2;
-  if (gradRad2) gradRad2.hidden = lin2;
-
-  const bm1 = state.texturePatternKind1 === 'bitmap';
-  const sw1 = document.getElementById('layout-tex-pat-stripes-wrap-1');
-  const bw1 = document.getElementById('layout-tex-pat-bitmap-wrap-1');
-  if (sw1) sw1.hidden = bm1;
-  if (bw1) bw1.hidden = !bm1;
-  const bm2 = state.texturePatternKind2 === 'bitmap';
-  const sw2 = document.getElementById('layout-tex-pat-stripes-wrap-2');
-  const bw2 = document.getElementById('layout-tex-pat-bitmap-wrap-2');
-  if (sw2) sw2.hidden = bm2;
-  if (bw2) bw2.hidden = !bm2;
-}
-
-function revokeTexturePatternBitmap(state, layerNum) {
-  const uKey = layerNum === 1 ? 'texturePatternBitmapUrl1' : 'texturePatternBitmapUrl2';
-  const cur = state[uKey];
-  if (cur && String(cur).startsWith('blob:')) {
-    try {
-      URL.revokeObjectURL(cur);
-    } catch {}
-  }
-  state[uKey] = '';
-}
-
-function syncTexturePatternControlsFromState(state) {
-  const pe1 = document.getElementById('layout-texture-pat-enable-1');
-  const pe2 = document.getElementById('layout-texture-pat-enable-2');
-  if (pe1) pe1.checked = !!state.texturePatternEnabled1;
-  if (pe2) pe2.checked = !!state.texturePatternEnabled2;
-  const s1 = document.getElementById('layout-texture-pat-stripes-1');
-  const b1 = document.getElementById('layout-texture-pat-bitmap-1');
-  if (s1 && b1) {
-    const bm = state.texturePatternKind1 === 'bitmap';
-    s1.checked = !bm;
-    b1.checked = bm;
-  }
-  const s2 = document.getElementById('layout-texture-pat-stripes-2');
-  const b2 = document.getElementById('layout-texture-pat-bitmap-2');
-  if (s2 && b2) {
-    const bm2 = state.texturePatternKind2 === 'bitmap';
-    s2.checked = !bm2;
-    b2.checked = bm2;
-  }
-  const a1 = document.getElementById('layout-texture-pat-angle-1');
-  const a1l = document.getElementById('layout-texture-pat-angle-1-label');
-  if (a1) a1.value = String(state.texturePatternStripesAngle1 ?? 0);
-  if (a1l) a1l.textContent = `Úhel pruhů: ${state.texturePatternStripesAngle1 ?? 0}°`;
-  const p1 = document.getElementById('layout-texture-pat-period-1');
-  const p1l = document.getElementById('layout-texture-pat-period-1-label');
-  if (p1) p1.value = String(state.texturePatternStripesPeriod1 ?? 14);
-  if (p1l) p1l.textContent = `Rozteč: ${state.texturePatternStripesPeriod1 ?? 14}px`;
-  const r1 = document.getElementById('layout-texture-pat-ratio-1');
-  const r1l = document.getElementById('layout-texture-pat-ratio-1-label');
-  const pct1 = Math.round((Number(state.texturePatternStripesRatio1) || 0.45) * 100);
-  if (r1) r1.value = String(pct1);
-  if (r1l) r1l.textContent = `Šířka pruhu: ${pct1}%`;
-  const sc1 = document.getElementById('layout-texture-pat-bitmap-scale-1');
-  const sc1l = document.getElementById('layout-texture-pat-bitmap-scale-1-label');
-  if (sc1) sc1.value = String(state.texturePatternBitmapScale1 ?? 100);
-  if (sc1l) sc1l.textContent = `Dlaždice: ${state.texturePatternBitmapScale1 ?? 100}%`;
-
-  const a2 = document.getElementById('layout-texture-pat-angle-2');
-  const a2l = document.getElementById('layout-texture-pat-angle-2-label');
-  if (a2) a2.value = String(state.texturePatternStripesAngle2 ?? 0);
-  if (a2l) a2l.textContent = `Úhel pruhů: ${state.texturePatternStripesAngle2 ?? 0}°`;
-  const p2 = document.getElementById('layout-texture-pat-period-2');
-  const p2l = document.getElementById('layout-texture-pat-period-2-label');
-  if (p2) p2.value = String(state.texturePatternStripesPeriod2 ?? 14);
-  if (p2l) p2l.textContent = `Rozteč: ${state.texturePatternStripesPeriod2 ?? 14}px`;
-  const r2 = document.getElementById('layout-texture-pat-ratio-2');
-  const r2l = document.getElementById('layout-texture-pat-ratio-2-label');
-  const pct2 = Math.round((Number(state.texturePatternStripesRatio2) || 0.45) * 100);
-  if (r2) r2.value = String(pct2);
-  if (r2l) r2l.textContent = `Šířka pruhu: ${pct2}%`;
-  const sc2 = document.getElementById('layout-texture-pat-bitmap-scale-2');
-  const sc2l = document.getElementById('layout-texture-pat-bitmap-scale-2-label');
-  if (sc2) sc2.value = String(state.texturePatternBitmapScale2 ?? 100);
-  if (sc2l) sc2l.textContent = `Dlaždice: ${state.texturePatternBitmapScale2 ?? 100}%`;
-  const bps1 = document.getElementById('layout-texture-pat-bitmap-per-shape-1');
-  if (bps1) bps1.checked = !!state.texturePatternBitmapPerShape1;
-  const bps2 = document.getElementById('layout-texture-pat-bitmap-per-shape-2');
-  if (bps2) bps2.checked = !!state.texturePatternBitmapPerShape2;
-  syncTextureSubpanelVisibility(state);
 }
 
 function rgbToHex(r, g, b) {
@@ -1500,7 +930,6 @@ function computeLayoutVerticalCenterShift(state, stageIndices1, stageIndices2, s
   const feature = state.fontFeatureSettings || '"ss04" 1';
   const { fontName1, fontName2, pointIds, numPoints, layer1Visible, layer2Visible } = state;
   const { availCellW, availCellH, cellHeight } = cellGeom;
-  const fkFeat = layoutFeatureCssToFontKit(feature);
   const fk1 = getResolvedLayoutFontKit(fontName1);
   const fk2 = getResolvedLayoutFontKit(fontName2);
 
@@ -1533,11 +962,11 @@ function computeLayoutVerticalCenterShift(state, stageIndices1, stageIndices2, s
     if (centerAnchors) {
       let maxHalf = 0;
       if (layer1Visible) {
-        const ink = glyphCenterHalfSpanTimesFit(char, fk1, axes1, fkFeat, fitUnified);
+        const ink = filhramonieInkHalfHeightTimesFit(char, fk1, axes1, fitUnified);
         maxHalf = Math.max(maxHalf, ink ?? (h1 * fitUnified) / 2);
       }
       if (layer2Visible) {
-        const ink = glyphCenterHalfSpanTimesFit(char, fk2, axes2, fkFeat, fitUnified);
+        const ink = filhramonieInkHalfHeightTimesFit(char, fk2, axes2, fitUnified);
         maxHalf = Math.max(maxHalf, ink ?? (h2 * fitUnified) / 2);
       }
       if (maxHalf <= 0) continue;
@@ -1546,11 +975,11 @@ function computeLayoutVerticalCenterShift(state, stageIndices1, stageIndices2, s
     } else {
       let maxH = 0;
       if (layer1Visible) {
-        const ink = glyphHeightAboveBottomPivotTimesFit(char, fk1, axes1, fkFeat, fitScale1);
+        const ink = filhramonieInkFullHeightTimesFit(char, fk1, axes1, fitScale1);
         maxH = Math.max(maxH, ink ?? h1 * fitScale1);
       }
       if (layer2Visible) {
-        const ink = glyphHeightAboveBottomPivotTimesFit(char, fk2, axes2, fkFeat, fitScale2);
+        const ink = filhramonieInkFullHeightTimesFit(char, fk2, axes2, fitScale2);
         maxH = Math.max(maxH, ink ?? h2 * fitScale2);
       }
       if (maxH <= 0) continue;
@@ -1571,7 +1000,6 @@ function computeLayoutContentBoundsWithShift(state, stageIndices1, stageIndices2
   const feature = state.fontFeatureSettings || '"ss04" 1';
   const { fontName1, fontName2, pointIds, numPoints, layer1Visible, layer2Visible } = state;
   const { availCellW, availCellH, cellHeight } = cellGeom;
-  const fkFeat = layoutFeatureCssToFontKit(feature);
   const fk1 = getResolvedLayoutFontKit(fontName1);
   const fk2 = getResolvedLayoutFontKit(fontName2);
 
@@ -1606,16 +1034,16 @@ function computeLayoutContentBoundsWithShift(state, stageIndices1, stageIndices2
       let maxHalfY = 0;
       let halfW = 0;
       if (layer1Visible) {
-        const inkY = glyphCenterHalfSpanTimesFit(char, fk1, axes1, fkFeat, fitUnified);
+        const inkY = filhramonieInkHalfHeightTimesFit(char, fk1, axes1, fitUnified);
         maxHalfY = Math.max(maxHalfY, inkY ?? (h1 * fitUnified) / 2);
-        const inkW = glyphMaxHalfWidthTimesFit(char, fk1, axes1, fkFeat, fitUnified);
-        halfW = Math.max(halfW, inkW ?? (w1 * fitUnified) / 2);
+        const inkWi = filhramonieInkHalfWidthTimesFit(char, fk1, axes1, fitUnified);
+        halfW = Math.max(halfW, inkWi ?? (w1 * fitUnified) / 2);
       }
       if (layer2Visible) {
-        const inkY = glyphCenterHalfSpanTimesFit(char, fk2, axes2, fkFeat, fitUnified);
+        const inkY = filhramonieInkHalfHeightTimesFit(char, fk2, axes2, fitUnified);
         maxHalfY = Math.max(maxHalfY, inkY ?? (h2 * fitUnified) / 2);
-        const inkW = glyphMaxHalfWidthTimesFit(char, fk2, axes2, fkFeat, fitUnified);
-        halfW = Math.max(halfW, inkW ?? (w2 * fitUnified) / 2);
+        const inkWi = filhramonieInkHalfWidthTimesFit(char, fk2, axes2, fitUnified);
+        halfW = Math.max(halfW, inkWi ?? (w2 * fitUnified) / 2);
       }
       if (maxHalfY <= 0) continue;
       minX = Math.min(minX, ax - halfW);
@@ -1626,15 +1054,15 @@ function computeLayoutContentBoundsWithShift(state, stageIndices1, stageIndices2
       let maxH = 0;
       let halfW = 0;
       if (layer1Visible) {
-        const inkH = glyphHeightAboveBottomPivotTimesFit(char, fk1, axes1, fkFeat, fitScale1);
+        const inkH = filhramonieInkFullHeightTimesFit(char, fk1, axes1, fitScale1);
         maxH = Math.max(maxH, inkH ?? h1 * fitScale1);
-        const inkWi = glyphMaxHalfWidthTimesFit(char, fk1, axes1, fkFeat, fitScale1);
+        const inkWi = filhramonieInkHalfWidthTimesFit(char, fk1, axes1, fitScale1);
         halfW = Math.max(halfW, inkWi ?? (w1 * fitScale1) / 2);
       }
       if (layer2Visible) {
-        const inkH = glyphHeightAboveBottomPivotTimesFit(char, fk2, axes2, fkFeat, fitScale2);
+        const inkH = filhramonieInkFullHeightTimesFit(char, fk2, axes2, fitScale2);
         maxH = Math.max(maxH, inkH ?? h2 * fitScale2);
-        const inkWi = glyphMaxHalfWidthTimesFit(char, fk2, axes2, fkFeat, fitScale2);
+        const inkWi = filhramonieInkHalfWidthTimesFit(char, fk2, axes2, fitScale2);
         halfW = Math.max(halfW, inkWi ?? (w2 * fitScale2) / 2);
       }
       if (maxH <= 0) continue;
@@ -1738,6 +1166,44 @@ font-feature-settings: ${feature};`;
 
   if (cssEl1) cssEl1.textContent = layer1Visible ? cssBlock(fontName1, variation1) : '—';
   if (cssEl2) cssEl2.textContent = layer2Visible ? cssBlock(fontName2, variation2) : '—';
+
+  const pfTop1 = document.getElementById('layout-css-poster-top1');
+  const pfTop2 = document.getElementById('layout-css-poster-top2');
+  const pfBot1 = document.getElementById('layout-css-poster-bot1');
+  const pfBot2 = document.getElementById('layout-css-poster-bot2');
+  const pLabelTop1 = document.getElementById('layout-font-info-poster-top1');
+  const pLabelTop2 = document.getElementById('layout-font-info-poster-top2');
+  const pLabelBot1 = document.getElementById('layout-font-info-poster-bot1');
+  const pLabelBot2 = document.getElementById('layout-font-info-poster-bot2');
+  if (pfTop1 || pfTop2 || pfBot1 || pfBot2) {
+    const posterFeatRaw = posterFeatureKeyToCss(
+      document.getElementById('poster-feature')?.value || 'normal'
+    );
+    const posterFeatCss = posterFeatRaw === 'normal' ? 'normal' : posterFeatRaw;
+    const posterCssBlock = (fn, varStr, vis) => {
+      if (!vis) return '—';
+      return `font-family: "Bertin-${fn}", sans-serif;
+font-variation-settings: ${varStr};
+font-feature-settings: ${posterFeatCss};`;
+    };
+    const pst1 = stageIndices1[0] % NUM_STAGES;
+    const pst2 = stageIndices2[0] % NUM_STAGES;
+    const psb1 = (stageIndices1[1] != null ? stageIndices1[1] : stageIndices1[0]) % NUM_STAGES;
+    const psb2 = (stageIndices2[1] != null ? stageIndices2[1] : stageIndices2[0]) % NUM_STAGES;
+    const pvTop1 = getVariationString(getAxesForLayer(state, 1, pst1));
+    const pvTop2 = getVariationString(getAxesForLayer(state, 2, pst2));
+    const pvBot1 = getVariationString(getAxesForLayer(state, 1, psb1));
+    const pvBot2 = getVariationString(getAxesForLayer(state, 2, psb2));
+
+    if (pLabelTop1) pLabelTop1.textContent = `${COMPANION_LABELS[fontName1]} · Plakát horní · Vrstva 1 · st. ${pst1}`;
+    if (pLabelTop2) pLabelTop2.textContent = `${COMPANION_LABELS[fontName2]} · Plakát horní · Vrstva 2 · st. ${pst2}`;
+    if (pLabelBot1) pLabelBot1.textContent = `${COMPANION_LABELS[fontName1]} · Plakát dolní · Vrstva 1 · st. ${psb1}`;
+    if (pLabelBot2) pLabelBot2.textContent = `${COMPANION_LABELS[fontName2]} · Plakát dolní · Vrstva 2 · st. ${psb2}`;
+    if (pfTop1) pfTop1.textContent = posterCssBlock(fontName1, pvTop1, layer1Visible);
+    if (pfTop2) pfTop2.textContent = posterCssBlock(fontName2, pvTop2, layer2Visible);
+    if (pfBot1) pfBot1.textContent = posterCssBlock(fontName1, pvBot1, layer1Visible);
+    if (pfBot2) pfBot2.textContent = posterCssBlock(fontName2, pvBot2, layer2Visible);
+  }
 }
 
 function renderLayout(state, stageIndices1, stageIndices2) {
@@ -1767,30 +1233,6 @@ function renderLayout(state, stageIndices1, stageIndices2) {
   const layer2 = document.createElement('div');
   layer2.className = 'layout-layer2';
   layer2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${layer2Visible === false ? ' visibility: hidden;' : ''}`;
-
-  const fkFeat = layoutFeatureCssToFontKit(feature);
-  const fk1 = getResolvedLayoutFontKit(fontName1);
-  const fk2 = getResolvedLayoutFontKit(fontName2);
-  const usePathLayers = !!(fk1 && fk2);
-
-  let layerSvg1 = null;
-  let layerSvg2 = null;
-  if (usePathLayers) {
-    layerSvg1 = document.createElementNS(SVG_NS, 'svg');
-    layerSvg1.setAttribute('class', 'layout-layer-svg');
-    layerSvg1.setAttribute('data-layer', '1');
-    layerSvg1.setAttribute('width', String(CANVAS_W));
-    layerSvg1.setAttribute('height', String(CANVAS_H));
-    layerSvg1.setAttribute('viewBox', `0 0 ${CANVAS_W} ${CANVAS_H}`);
-    layerSvg1.style.cssText = 'position:absolute;inset:0;overflow:visible;pointer-events:none;';
-    layerSvg2 = document.createElementNS(SVG_NS, 'svg');
-    layerSvg2.setAttribute('class', 'layout-layer-svg');
-    layerSvg2.setAttribute('data-layer', '2');
-    layerSvg2.setAttribute('width', String(CANVAS_W));
-    layerSvg2.setAttribute('height', String(CANVAS_H));
-    layerSvg2.setAttribute('viewBox', `0 0 ${CANVAS_W} ${CANVAS_H}`);
-    layerSvg2.style.cssText = 'position:absolute;inset:0;overflow:visible;pointer-events:none;mix-blend-mode:multiply;';
-  }
 
   for (let i = 0; i < numPoints; i++) {
     const stage1 = stageIndices1[i] % NUM_STAGES;
@@ -1846,42 +1288,10 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       fitUnified
     });
 
-    if (usePathLayers) {
-      const glyph1 = getGlyphPathFromFontKit(fk1, char, FONT_SIZE_LOAD, axes1, fkFeat);
-      const glyph2 = getGlyphPathFromFontKit(fk2, char, FONT_SIZE_LOAD, axes2, fkFeat);
-      if (layer1Visible && glyph1) {
-        const py1 = centerAnchors ? glyph1.pivotYCenter : glyph1.pivotYBottom;
-        const tr = `translate(${anchorX},${anchorY}) scale(${scale1}) scale(1,-1) translate(${-glyph1.pivotX},${-py1})`;
-        const g = document.createElementNS(SVG_NS, 'g');
-        g.setAttribute('transform', tr);
-        g.dataset.debugIdx = String(i);
-        for (const sub of glyph1.contours) {
-          const p = document.createElementNS(SVG_NS, 'path');
-          p.setAttribute('d', sub.pathData);
-          p.setAttribute('fill', `rgb(${logo1Color[0]},${logo1Color[1]},${logo1Color[2]})`);
-          g.appendChild(p);
-        }
-        layerSvg1.appendChild(g);
-      }
-      if (layer2Visible && glyph2) {
-        const py2 = centerAnchors ? glyph2.pivotYCenter : glyph2.pivotYBottom;
-        const tr = `translate(${anchorX},${anchorY}) scale(${scale2}) scale(1,-1) translate(${-glyph2.pivotX},${-py2})`;
-        const g = document.createElementNS(SVG_NS, 'g');
-        g.setAttribute('transform', tr);
-        g.dataset.debugIdx = String(i);
-        for (const sub of glyph2.contours) {
-          const p = document.createElementNS(SVG_NS, 'path');
-          p.setAttribute('d', sub.pathData);
-          p.setAttribute('fill', `rgb(${logo2Color[0]},${logo2Color[1]},${logo2Color[2]})`);
-          g.appendChild(p);
-        }
-        layerSvg2.appendChild(g);
-      }
-    } else {
-      const span1 = document.createElement('span');
-      span1.textContent = char;
-      span1.dataset.debugIdx = String(i);
-      span1.style.cssText = `
+    const span1 = document.createElement('span');
+    span1.textContent = char;
+    span1.dataset.debugIdx = String(i);
+    span1.style.cssText = `
       position: absolute;
       left: ${anchorX}px;
       top: ${anchorY}px;
@@ -1895,12 +1305,12 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       line-height: 1;
       pointer-events: none;
     `;
-      layer1.appendChild(span1);
+    layer1.appendChild(span1);
 
-      const span2 = document.createElement('span');
-      span2.textContent = char;
-      span2.dataset.debugIdx = String(i);
-      span2.style.cssText = `
+    const span2 = document.createElement('span');
+    span2.textContent = char;
+    span2.dataset.debugIdx = String(i);
+    span2.style.cssText = `
       position: absolute;
       left: ${anchorX}px;
       top: ${anchorY}px;
@@ -1914,13 +1324,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       line-height: 1;
       pointer-events: none;
     `;
-      layer2.appendChild(span2);
-    }
-  }
-
-  if (usePathLayers) {
-    layer1.appendChild(layerSvg1);
-    layer2.appendChild(layerSvg2);
+    layer2.appendChild(span2);
   }
 
   wrapper.appendChild(layer1);
@@ -1937,16 +1341,12 @@ function renderLayout(state, stageIndices1, stageIndices2) {
     const scaleX = wr.width / CANVAS_W;
     const scaleY = wr.height / CANVAS_H;
     const spanDebug = [];
-    const pathDebugGlyphs = !!layer1.querySelector('svg.layout-layer-svg');
-    const layer1Els = pathDebugGlyphs
-      ? layer1.querySelectorAll('g[data-debug-idx]')
-      : layer1.querySelectorAll('span[data-debug-idx]');
-    layer1Els.forEach((span) => {
+    layer1.querySelectorAll('[data-debug-idx]').forEach((span) => {
       const i = parseInt(span.dataset.debugIdx, 10);
       const set = renderLayoutDebug[i];
       const r = span.getBoundingClientRect();
-      const setLeft = pathDebugGlyphs ? (set?.left ?? 0) : (parseFloat(span.style.left) || 0);
-      const setTop = pathDebugGlyphs ? (set?.top ?? 0) : (parseFloat(span.style.top) || 0);
+      const setLeft = parseFloat(span.style.left) || 0;
+      const setTop = parseFloat(span.style.top) || 0;
       const relX = r.x - wr.x;
       const relY = r.y - wr.y;
       const actCenterX = (relX + r.width / 2) / scaleX;
@@ -2005,9 +1405,7 @@ function renderLayout(state, stageIndices1, stageIndices2) {
     })));
     const layoutCanvas = container.getBoundingClientRect();
     const wrapperComputed = window.getComputedStyle(wrapper);
-    const firstSpan = pathDebugGlyphs
-      ? layer1.querySelector('g[data-debug-idx="0"]')
-      : layer1.querySelector('span[data-debug-idx="0"]');
+    const firstSpan = layer1.querySelector('[data-debug-idx="0"]');
     const firstSpanRect = firstSpan ? firstSpan.getBoundingClientRect() : null;
     const layoutContext = {
       view: 'font',
@@ -2023,14 +1421,9 @@ function renderLayout(state, stageIndices1, stageIndices2) {
       } : null
     };
     const layerPairDiff = [];
-    const layer2Els = pathDebugGlyphs
-      ? layer2.querySelectorAll('g[data-debug-idx]')
-      : layer2.querySelectorAll('span[data-debug-idx]');
-    layer2Els.forEach((span2) => {
+    layer2.querySelectorAll('[data-debug-idx]').forEach((span2) => {
       const i = parseInt(span2.dataset.debugIdx, 10);
-      const span1 = pathDebugGlyphs
-        ? layer1.querySelector(`g[data-debug-idx="${i}"]`)
-        : layer1.querySelector(`span[data-debug-idx="${i}"]`);
+      const span1 = layer1.querySelector(`[data-debug-idx="${i}"]`);
       if (!span1) return;
       const r1 = span1.getBoundingClientRect();
       const r2 = span2.getBoundingClientRect();
@@ -2061,6 +1454,26 @@ function getLayoutCanvasInnerSize(container) {
   return { width, height };
 }
 
+function applyLayoutShapesDisplayScale(svgEl) {
+  if (!svgEl || LAYOUT_SHAPES_DISPLAY_SCALE === 1) return;
+  const cx = CANVAS_W / 2;
+  const cy = CANVAS_H / 2;
+  const s = LAYOUT_SHAPES_DISPLAY_SCALE;
+  const shell = document.createElementNS(SVG_NS, 'g');
+  shell.setAttribute('transform', `translate(${cx},${cy}) scale(${s}) translate(${-cx},${-cy})`);
+  const layoutContent = svgEl.querySelector('#layout-content');
+  if (layoutContent) {
+    svgEl.insertBefore(shell, layoutContent);
+    shell.appendChild(layoutContent);
+    return;
+  }
+  const filterRect = svgEl.querySelector('rect[filter]');
+  if (filterRect) {
+    svgEl.insertBefore(shell, filterRect);
+    shell.appendChild(filterRect);
+  }
+}
+
 function scaleLayoutToFit(container) {
   const wrapper = container.querySelector('.layout-wrapper');
   if (!container || !wrapper) return;
@@ -2078,152 +1491,6 @@ function scaleLayoutToFit(container) {
   wrapper.style.transform = `translate(-50%, -50%) scale(${scale})`;
 }
 
-function parseCssTransformScale(transformStr) {
-  if (!transformStr || transformStr === 'none') return { sx: 1, sy: 1 };
-  const matrixMatch = transformStr.match(/matrix\(([^)]+)\)/);
-  if (matrixMatch) {
-    const parts = matrixMatch[1]
-      .trim()
-      .split(/[\s,]+/)
-      .map((x) => parseFloat(x))
-      .filter((n) => !Number.isNaN(n));
-    if (parts.length >= 4) {
-      const a = parts[0];
-      const b = parts[1];
-      const c = parts[2];
-      const d = parts[3];
-      return { sx: Math.hypot(a, b), sy: Math.hypot(c, d) };
-    }
-  }
-  const scaleMatch = transformStr.match(/scale\(([^)]+)\)/);
-  if (scaleMatch) {
-    const vals = scaleMatch[1]
-      .trim()
-      .split(/[\s,]+/)
-      .map((x) => parseFloat(x))
-      .filter((n) => !Number.isNaN(n));
-    const sxa = vals[0] || 1;
-    const sya = vals.length > 1 ? vals[1] : sxa;
-    return { sx: sxa, sy: sya };
-  }
-  return { sx: 1, sy: 1 };
-}
-
-function collectLayoutCutoutDebugSnapshot(note, layoutContainer, state, stageIndices1, stageIndices2) {
-  const layoutEl = document.getElementById('layout-canvas');
-  const wrap = layoutEl?.querySelector('.layout-wrapper');
-  const inner = layoutContainer ? getLayoutCanvasInnerSize(layoutContainer) : { width: 0, height: 0 };
-  const tr = wrap ? window.getComputedStyle(wrap).transform : 'none';
-  const { sx, sy } = parseCssTransformScale(tr);
-  const wr = wrap?.getBoundingClientRect();
-  const layoutCanvas = layoutContainer?.getBoundingClientRect();
-  const svgEl = wrap?.querySelector('svg');
-  let pathBBoxUnion = '—';
-  let pathCount = 0;
-  try {
-    if (svgEl) {
-      const paths = Array.from(svgEl.querySelectorAll('path'));
-      pathCount = paths.length;
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const p of paths) {
-        const bb = p.getBBox();
-        minX = Math.min(minX, bb.x);
-        minY = Math.min(minY, bb.y);
-        maxX = Math.max(maxX, bb.x + bb.width);
-        maxY = Math.max(maxY, bb.y + bb.height);
-      }
-      if (Number.isFinite(minX) && pathCount) {
-        pathBBoxUnion = `x ${minX.toFixed(1)}–${maxX.toFixed(1)} y ${minY.toFixed(1)}–${maxY.toFixed(1)} (${(maxX - minX).toFixed(1)}×${(maxY - minY).toFixed(1)})`;
-      }
-    }
-  } catch {
-    pathBBoxUnion = 'getBBox err';
-  }
-
-  const sxArr = state.screenX || [];
-  const syArr = state.screenY || [];
-  const screenSpan =
-    sxArr.length > 0
-      ? `X ${Math.min(...sxArr).toFixed(0)}–${Math.max(...sxArr).toFixed(0)} · Y ${Math.min(...syArr).toFixed(0)}–${Math.max(...syArr).toFixed(0)}`
-      : '—';
-
-  const cellGeom = { availCellW: state.availCellW, availCellH: state.availCellH, cellHeight: state.cellHeight };
-  const shiftY =
-    sxArr.length && stageIndices1?.length
-      ? computeLayoutVerticalCenterShift(state, stageIndices1, stageIndices2, state.screenX, state.screenY, cellGeom)
-      : 0;
-
-  const fitScaleW = inner.width / CANVAS_W;
-  const fitScaleH = inner.height / CANVAS_H;
-  const fitMin = Math.min(fitScaleW, fitScaleH);
-  const fitExpected = Math.min(fitMin, 1);
-
-  return {
-    note,
-    pair_cutout_chrome: String(layoutViewUsesCutoutChrome(state)),
-    layoutGlyphAnchor: state.layoutGlyphAnchor || 'bottom',
-    wrapper_class: wrap?.className || '—',
-    canvas_inner_css: `${inner.width.toFixed(0)}×${inner.height.toFixed(0)}`,
-    fit_to_inner: `${fitScaleW.toFixed(4)} / ${fitScaleH.toFixed(4)} (min cap 1 → ${fitExpected.toFixed(4)})`,
-    wrapper_css_size: `${CANVAS_W}×${CANVAS_H}`,
-    wrapper_client_rect: wr ? `${wr.width.toFixed(1)}×${wr.height.toFixed(1)}` : '—',
-    css_transform_scale: `${sx.toFixed(4)} × ${sy.toFixed(4)}`,
-    layout_canvas_rect: layoutCanvas ? `${layoutCanvas.width.toFixed(0)}×${layoutCanvas.height.toFixed(0)}` : '—',
-    svg_root_wh: svgEl ? `${svgEl.getAttribute('width') || '?'}×${svgEl.getAttribute('height') || '?'}` : '—',
-    svg_viewBox: svgEl?.getAttribute('viewBox') || '—',
-    path_count: String(pathCount),
-    path_bbox_union_SVG_px: pathBBoxUnion,
-    screen_span_anchor: screenSpan,
-    availCell: `${typeof state.availCellW === 'number' ? state.availCellW.toFixed(2) : '—'} × ${typeof state.availCellH === 'number' ? state.availCellH.toFixed(2) : '—'}`,
-    cellHeight: typeof state.cellHeight === 'number' ? state.cellHeight.toFixed(4) : '—',
-    shiftY: Number(shiftY).toFixed(2)
-  };
-}
-
-function logLayoutCutoutComparisonTable(before, after, shapes) {
-  const allKeys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
-  const rows = allKeys.map((metric) => ({
-    metric,
-    before: String(before[metric] ?? '—'),
-    after: String(after[metric] ?? '—')
-  }));
-  const shapesSummary = shapes
-    ? {
-        layoutExportW: shapes.layoutExportW,
-        layoutExportH: shapes.layoutExportH,
-        svg_has_cutout_filter: !!shapes.layoutSvg?.includes('layout-cutout-f-'),
-        layoutSvg_chars: shapes.layoutSvg?.length ?? 0
-      }
-    : null;
-  const tsv = ['metric\tbefore\tafter', ...rows.map((r) => `${r.metric}\t${r.before}\t${r.after}`)].join('\n');
-  layoutDlog('[Layout výřez DEBUG] window.__layoutCutoutDebugLast');
-  layoutDlog(tsv);
-  const conv = typeof window !== 'undefined' ? window.__layoutConversionDebug : null;
-  const pathAnchors =
-    conv?.after?.map((r) => ({
-      i: r.i,
-      pointId: r.pointId ?? '—',
-      char: r.char ?? '—',
-      svgPosX: typeof r.svgPosX === 'number' ? r.svgPosX.toFixed(2) : '—',
-      svgPosY: typeof r.svgPosY === 'number' ? r.svgPosY.toFixed(2) : '—',
-      anchor: r.anchor ?? '—',
-      fitUnified: r.fitUnified != null ? r.fitUnified.toFixed(4) : '—'
-    })) ?? null;
-  const payload = { rows, shapesSummary, pathAnchors };
-  layoutDlog(JSON.stringify(payload, null, 2));
-  layoutDtable(rows);
-  if (pathAnchors?.length) {
-    layoutDlog('[Layout výřez DEBUG] Path anchors (canvas px)');
-    layoutDtable(pathAnchors);
-  }
-  if (typeof window !== 'undefined') {
-    window.__layoutCutoutDebugLast = { before, after, rows, shapesSummary, tsv, pathAnchors };
-  }
-}
-
 const POSTER_MARGIN = 48;
 const POSTER_FONT_SIZE = 400;
 
@@ -2237,14 +1504,6 @@ function posterFeatureKeyToFontKit(key) {
   return { [key]: 1 };
 }
 
-function layoutFeatureCssToFontKit(css) {
-  const fk = {};
-  const s = String(css || '');
-  for (const m of s.matchAll(/"?(ss\d+)"?\s+1/gi)) fk[m[1]] = 1;
-  if (Object.keys(fk).length) return fk;
-  return { ss04: 1 };
-}
-
 function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterNumber, posterFeatureKey) {
   const posterContainer = document.getElementById('poster-canvas');
   if (!posterContainer) return;
@@ -2252,23 +1511,31 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
   const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
   const feature = posterFeatureKeyToCss(posterFeatureKey);
 
-  const stage1 = stageIndices1[0] % NUM_STAGES;
-  const stage2 = stageIndices2[0] % NUM_STAGES;
-  const axes1 = getAxesForLayer(state, 1, stage1);
-  const axes2 = getAxesForLayer(state, 2, stage2);
-  const variation1 = getVariationString(axes1);
-  const variation2 = getVariationString(axes2);
+  const sTop1 = stageIndices1[0] % NUM_STAGES;
+  const sTop2 = stageIndices2[0] % NUM_STAGES;
+  const sBot1 = (stageIndices1[1] != null ? stageIndices1[1] : stageIndices1[0]) % NUM_STAGES;
+  const sBot2 = (stageIndices2[1] != null ? stageIndices2[1] : stageIndices2[0]) % NUM_STAGES;
 
-  const letter = String(posterLetter || 'S').charAt(0);
-  const number = String(posterNumber || '1').charAt(0);
+  const axesTop1 = getAxesForLayer(state, 1, sTop1);
+  const axesTop2 = getAxesForLayer(state, 2, sTop2);
+  const axesBot1 = getAxesForLayer(state, 1, sBot1);
+  const axesBot2 = getAxesForLayer(state, 2, sBot2);
+  const variationTop1 = getVariationString(axesTop1);
+  const variationTop2 = getVariationString(axesTop2);
+  const variationBot1 = getVariationString(axesBot1);
+  const variationBot2 = getVariationString(axesBot2);
 
-  const { w: w1, h: h1 } = measureGlyph(letter, fontName1, variation1, feature);
-  const { w: w2, h: h2 } = measureGlyph(number, fontName2, variation2, feature);
+  const letter = String(posterLetter || 'F').charAt(0);
+
+  const mTop1 = measureGlyph(letter, fontName1, variationTop1, feature);
+  const mTop2 = measureGlyph(letter, fontName2, variationTop2, feature);
+  const mBot1 = measureGlyph(letter, fontName1, variationBot1, feature);
+  const mBot2 = measureGlyph(letter, fontName2, variationBot2, feature);
+  const maxW = Math.max(mTop1.w, mTop2.w, mBot1.w, mBot2.w);
+  const maxH = Math.max(mTop1.h, mTop2.h, mBot1.h, mBot2.h);
 
   const availW = POSTER_W - 2 * POSTER_MARGIN;
   const availH = POSTER_H - 2 * POSTER_MARGIN;
-  const maxW = Math.max(w1, w2);
-  const maxH = Math.max(h1, h2);
   const fitScale = Math.min(availW / maxW, availH / maxH) * (FONT_SIZE_LOAD / POSTER_FONT_SIZE);
 
   const centerX = POSTER_W / 2;
@@ -2282,65 +1549,18 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
   wrapper.className = 'poster-wrapper';
   wrapper.style.cssText = `position: relative; width: ${POSTER_W}px; height: ${POSTER_H}px; background: ${canvasBg};`;
 
-  const layer1 = document.createElement('div');
-  layer1.className = 'poster-layer1';
-  layer1.style.cssText = `position: absolute; inset: 0;${layer1Visible === false ? ' visibility: hidden;' : ''}`;
-  const layer2 = document.createElement('div');
-  layer2.className = 'poster-layer2';
-  layer2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${layer2Visible === false ? ' visibility: hidden;' : ''}`;
-
-  const fk1 = getResolvedLayoutFontKit(fontName1);
-  const fk2 = getResolvedLayoutFontKit(fontName2);
-  const posterFeats = posterFeatureKeyToFontKit(posterFeatureKey);
-  const usePosterPaths = !!(fk1 && fk2);
-
-  if (usePosterPaths) {
-    const glyph1 = getGlyphPathFromFontKit(fk1, letter, POSTER_FONT_SIZE, axes1, posterFeats);
-    const glyph2 = getGlyphPathFromFontKit(fk2, number, POSTER_FONT_SIZE, axes2, posterFeats);
-    const layerSvg1 = document.createElementNS(SVG_NS, 'svg');
-    layerSvg1.setAttribute('class', 'layout-layer-svg');
-    layerSvg1.setAttribute('data-layer', '1');
-    layerSvg1.setAttribute('width', String(POSTER_W));
-    layerSvg1.setAttribute('height', String(POSTER_H));
-    layerSvg1.setAttribute('viewBox', `0 0 ${POSTER_W} ${POSTER_H}`);
-    layerSvg1.style.cssText = 'position:absolute;inset:0;overflow:visible;pointer-events:none;';
-    const layerSvg2 = document.createElementNS(SVG_NS, 'svg');
-    layerSvg2.setAttribute('class', 'layout-layer-svg');
-    layerSvg2.setAttribute('data-layer', '2');
-    layerSvg2.setAttribute('width', String(POSTER_W));
-    layerSvg2.setAttribute('height', String(POSTER_H));
-    layerSvg2.setAttribute('viewBox', `0 0 ${POSTER_W} ${POSTER_H}`);
-    layerSvg2.style.cssText = 'position:absolute;inset:0;overflow:visible;pointer-events:none;mix-blend-mode:multiply;';
-    if (layer1Visible && glyph1) {
-      const tr = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyph1.pivotX},${-glyph1.pivotYCenter})`;
-      const g = document.createElementNS(SVG_NS, 'g');
-      g.setAttribute('transform', tr);
-      for (const sub of glyph1.contours) {
-        const p = document.createElementNS(SVG_NS, 'path');
-        p.setAttribute('d', sub.pathData);
-        p.setAttribute('fill', `rgb(${logo1Color[0]},${logo1Color[1]},${logo1Color[2]})`);
-        g.appendChild(p);
-      }
-      layerSvg1.appendChild(g);
-    }
-    if (layer2Visible && glyph2) {
-      const tr = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyph2.pivotX},${-glyph2.pivotYCenter})`;
-      const g = document.createElementNS(SVG_NS, 'g');
-      g.setAttribute('transform', tr);
-      for (const sub of glyph2.contours) {
-        const p = document.createElementNS(SVG_NS, 'path');
-        p.setAttribute('d', sub.pathData);
-        p.setAttribute('fill', `rgb(${logo2Color[0]},${logo2Color[1]},${logo2Color[2]})`);
-        g.appendChild(p);
-      }
-      layerSvg2.appendChild(g);
-    }
-    layer1.appendChild(layerSvg1);
-    layer2.appendChild(layerSvg2);
-  } else {
-    const span1 = document.createElement('span');
-    span1.textContent = letter;
-    span1.style.cssText = `
+  function appendPosterHalf(clipInset, variation1, variation2) {
+    const half = document.createElement('div');
+    half.style.cssText = `position: absolute; inset: 0; clip-path: ${clipInset};`;
+    const sub1 = document.createElement('div');
+    sub1.className = 'poster-sublayer-1';
+    sub1.style.cssText = `position: absolute; inset: 0;${layer1Visible === false ? ' visibility: hidden;' : ''}`;
+    const sub2 = document.createElement('div');
+    sub2.className = 'poster-sublayer-2';
+    sub2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${layer2Visible === false ? ' visibility: hidden;' : ''}`;
+    const spanA = document.createElement('span');
+    spanA.textContent = letter;
+    spanA.style.cssText = `
     position: absolute;
     left: ${centerX}px;
     top: ${centerY}px;
@@ -2354,11 +1574,9 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
     line-height: 1;
     pointer-events: none;
   `;
-    layer1.appendChild(span1);
-
-    const span2 = document.createElement('span');
-    span2.textContent = number;
-    span2.style.cssText = `
+    const spanB = document.createElement('span');
+    spanB.textContent = letter;
+    spanB.style.cssText = `
     position: absolute;
     left: ${centerX}px;
     top: ${centerY}px;
@@ -2372,11 +1590,16 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
     line-height: 1;
     pointer-events: none;
   `;
-    layer2.appendChild(span2);
+    sub1.appendChild(spanA);
+    sub2.appendChild(spanB);
+    half.appendChild(sub1);
+    half.appendChild(sub2);
+    wrapper.appendChild(half);
   }
 
-  wrapper.appendChild(layer1);
-  wrapper.appendChild(layer2);
+  appendPosterHalf('inset(0 0 50% 0)', variationTop1, variationTop2);
+  appendPosterHalf('inset(50% 0 0 0)', variationBot1, variationBot2);
+
   posterContainer.appendChild(wrapper);
   scalePosterToFit(posterContainer);
 }
@@ -2402,27 +1625,32 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
   const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
   const feature = posterFeatureKeyToCss(posterFeatureKey);
 
-  const stage1 = stageIndices1[0] % NUM_STAGES;
-  const stage2 = stageIndices2[0] % NUM_STAGES;
-  const axes1 = getAxesForLayer(state, 1, stage1);
-  const axes2 = getAxesForLayer(state, 2, stage2);
-  const variation1 = getVariationString(axes1);
-  const variation2 = getVariationString(axes2);
+  const sTop1 = stageIndices1[0] % NUM_STAGES;
+  const sTop2 = stageIndices2[0] % NUM_STAGES;
+  const sBot1 = (stageIndices1[1] != null ? stageIndices1[1] : stageIndices1[0]) % NUM_STAGES;
+  const sBot2 = (stageIndices2[1] != null ? stageIndices2[1] : stageIndices2[0]) % NUM_STAGES;
 
-  const letter = String(posterLetter || 'S').charAt(0);
-  const number = String(posterNumber || '1').charAt(0);
+  const variationTop1 = getVariationString(getAxesForLayer(state, 1, sTop1));
+  const variationTop2 = getVariationString(getAxesForLayer(state, 2, sTop2));
+  const variationBot1 = getVariationString(getAxesForLayer(state, 1, sBot1));
+  const variationBot2 = getVariationString(getAxesForLayer(state, 2, sBot2));
 
-  const { w: w1, h: h1 } = measureGlyph(letter, fontName1, variation1, feature);
-  const { w: w2, h: h2 } = measureGlyph(number, fontName2, variation2, feature);
+  const letter = String(posterLetter || 'F').charAt(0);
+
+  const mTop1 = measureGlyph(letter, fontName1, variationTop1, feature);
+  const mTop2 = measureGlyph(letter, fontName2, variationTop2, feature);
+  const mBot1 = measureGlyph(letter, fontName1, variationBot1, feature);
+  const mBot2 = measureGlyph(letter, fontName2, variationBot2, feature);
+  const maxW = Math.max(mTop1.w, mTop2.w, mBot1.w, mBot2.w);
+  const maxH = Math.max(mTop1.h, mTop2.h, mBot1.h, mBot2.h);
 
   const availW = POSTER_W - 2 * POSTER_MARGIN;
   const availH = POSTER_H - 2 * POSTER_MARGIN;
-  const maxW = Math.max(w1, w2);
-  const maxH = Math.max(h1, h2);
   const fitScale = Math.min(availW / maxW, availH / maxH) * (FONT_SIZE_LOAD / POSTER_FONT_SIZE);
 
   const centerX = POSTER_W / 2;
   const centerY = POSTER_H / 2;
+  const halfH = POSTER_H / 2;
 
   const canvas = document.createElement('canvas');
   canvas.width = POSTER_W;
@@ -2447,10 +1675,40 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
     gCtx.restore();
   };
 
-  if (layer1Visible) drawGlyph(ctx, logo1Color, fontName1, variation1, fitScale, centerX, centerY, letter);
+  if (layer1Visible) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, POSTER_W, halfH);
+    ctx.clip();
+    drawGlyph(ctx, logo1Color, fontName1, variationTop1, fitScale, centerX, centerY, letter);
+    ctx.restore();
+  }
   if (layer2Visible) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, POSTER_W, halfH);
+    ctx.clip();
     ctx.globalCompositeOperation = 'multiply';
-    drawGlyph(ctx, logo2Color, fontName2, variation2, fitScale, centerX, centerY, number);
+    drawGlyph(ctx, logo2Color, fontName2, variationTop2, fitScale, centerX, centerY, letter);
+    ctx.restore();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  if (layer1Visible) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, halfH, POSTER_W, halfH);
+    ctx.clip();
+    drawGlyph(ctx, logo1Color, fontName1, variationBot1, fitScale, centerX, centerY, letter);
+    ctx.restore();
+  }
+  if (layer2Visible) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, halfH, POSTER_W, halfH);
+    ctx.clip();
+    ctx.globalCompositeOperation = 'multiply';
+    drawGlyph(ctx, logo2Color, fontName2, variationBot2, fitScale, centerX, centerY, letter);
+    ctx.restore();
     ctx.globalCompositeOperation = 'source-over';
   }
   return canvas;
@@ -2628,10 +1886,9 @@ function getGlyphPathFromFontKit(font, char, fontSize, axes, openTypeFeatures) {
   }
 }
 
-function collectSubcontourOmitPool(state, stageIndices1, stageIndices2, font1, font2, getPosterInputs) {
+function collectSubcontourOmitPool(state, stageIndices1, stageIndices2, font1, font2, _getPosterInputs) {
   const { pointIds, numPoints, layer1Visible, layer2Visible } = state;
-  const feature = state.fontFeatureSettings || '"ss04" 1';
-  const fkFeat = layoutFeatureCssToFontKit(feature);
+  const fkFeat = { ss04: 1 };
   const pool = [];
   for (let i = 0; i < numPoints; i++) {
     const stage1 = stageIndices1[i] % NUM_STAGES;
@@ -2648,30 +1905,12 @@ function collectSubcontourOmitPool(state, stageIndices1, stageIndices2, font1, f
       for (let si = 0; si < glyph2.contours.length; si++) pool.push({ layer: 2, i, si });
     }
   }
-  const pi = getPosterInputs();
-  const posterFeatureKey = pi.featureKey || 'normal';
-  const posterFk = posterFeatureKeyToFontKit(posterFeatureKey);
-  const stage1 = stageIndices1[0] % NUM_STAGES;
-  const stage2 = stageIndices2[0] % NUM_STAGES;
-  const axes1 = getAxesForLayer(state, 1, stage1);
-  const axes2 = getAxesForLayer(state, 2, stage2);
-  const letter = String(pi.letter || 'S').charAt(0);
-  const number = String(pi.number || '1').charAt(0);
-  const glyphP1 = getGlyphPathFromFontKit(font1, letter, POSTER_FONT_SIZE, axes1, posterFk);
-  const glyphP2 = getGlyphPathFromFontKit(font2, number, POSTER_FONT_SIZE, axes2, posterFk);
-  if (layer1Visible && glyphP1 && glyphP1.contours.length > 1) {
-    for (let si = 0; si < glyphP1.contours.length; si++) pool.push({ layer: 1, si, poster: true });
-  }
-  if (layer2Visible && glyphP2 && glyphP2.contours.length > 1) {
-    for (let si = 0; si < glyphP2.contours.length; si++) pool.push({ layer: 2, si, poster: true });
-  }
   return pool;
 }
 
-function collectSubcontourScalePool(state, stageIndices1, stageIndices2, font1, font2, getPosterInputs) {
+function collectFilhSubcontourScalePool(state, stageIndices1, stageIndices2, font1, font2, getPosterInputs) {
+  const fkFeat = { ss04: 1 };
   const { pointIds, numPoints, layer1Visible, layer2Visible } = state;
-  const feature = state.fontFeatureSettings || '"ss04" 1';
-  const fkFeat = layoutFeatureCssToFontKit(feature);
   const pool = [];
   for (let i = 0; i < numPoints; i++) {
     const stage1 = stageIndices1[i] % NUM_STAGES;
@@ -2691,20 +1930,28 @@ function collectSubcontourScalePool(state, stageIndices1, stageIndices2, font1, 
   const pi = getPosterInputs();
   const posterFeatureKey = pi.featureKey || 'normal';
   const posterFk = posterFeatureKeyToFontKit(posterFeatureKey);
-  const pst1 = stageIndices1[0] % NUM_STAGES;
-  const pst2 = stageIndices2[0] % NUM_STAGES;
-  const axesP1 = getAxesForLayer(state, 1, pst1);
-  const axesP2 = getAxesForLayer(state, 2, pst2);
-  const letter = String(pi.letter || 'S').charAt(0);
-  const number = String(pi.number || '1').charAt(0);
-  const glyphP1 = getGlyphPathFromFontKit(font1, letter, POSTER_FONT_SIZE, axesP1, posterFk);
-  const glyphP2 = getGlyphPathFromFontKit(font2, number, POSTER_FONT_SIZE, axesP2, posterFk);
-  if (layer1Visible && glyphP1 && glyphP1.contours.length) {
-    for (let si = 0; si < glyphP1.contours.length; si++) pool.push({ layer: 1, si, poster: true });
-  }
-  if (layer2Visible && glyphP2 && glyphP2.contours.length) {
-    for (let si = 0; si < glyphP2.contours.length; si++) pool.push({ layer: 2, si, poster: true });
-  }
+  const st1 = stageIndices1[0] % NUM_STAGES;
+  const st2 = stageIndices2[0] % NUM_STAGES;
+  const sb1 = (stageIndices1[1] != null ? stageIndices1[1] : stageIndices1[0]) % NUM_STAGES;
+  const sb2 = (stageIndices2[1] != null ? stageIndices2[1] : stageIndices2[0]) % NUM_STAGES;
+  const axesTop1 = getAxesForLayer(state, 1, st1);
+  const axesTop2 = getAxesForLayer(state, 2, st2);
+  const axesBot1 = getAxesForLayer(state, 1, sb1);
+  const axesBot2 = getAxesForLayer(state, 2, sb2);
+  const letter = String(pi.letter || 'F').charAt(0);
+  const glyphTop1 = getGlyphPathFromFontKit(font1, letter, POSTER_FONT_SIZE, axesTop1, posterFk);
+  const glyphTop2 = getGlyphPathFromFontKit(font2, letter, POSTER_FONT_SIZE, axesTop2, posterFk);
+  const glyphBot1 = getGlyphPathFromFontKit(font1, letter, POSTER_FONT_SIZE, axesBot1, posterFk);
+  const glyphBot2 = getGlyphPathFromFontKit(font2, letter, POSTER_FONT_SIZE, axesBot2, posterFk);
+  const add = (tag, g, vis) => {
+    if (vis && g && g.contours.length) {
+      for (let si = 0; si < g.contours.length; si++) pool.push({ filhTag: tag, si });
+    }
+  };
+  add('l1t', glyphTop1, layer1Visible);
+  add('l1b', glyphBot1, layer1Visible);
+  add('l2t', glyphTop2, layer2Visible);
+  add('l2b', glyphBot2, layer2Visible);
   return pool;
 }
 
@@ -2746,46 +1993,39 @@ function applyRandomSubcontourScales(state, scaledPicks) {
   clearShapeScaleState(state);
   clearShapeOmitState(state);
   for (const p of scaledPicks) {
-    if (p.poster) {
-      const m = p.layer === 1 ? state.shapeScalePosterSub1 : state.shapeScalePosterSub2;
-      m.set(p.si, p.scale);
-    } else {
-      const top = p.layer === 1 ? state.shapeScaleSubcontours1 : state.shapeScaleSubcontours2;
-      let inner = top.get(p.i);
-      if (!inner) {
-        inner = new Map();
-        top.set(p.i, inner);
-      }
-      inner.set(p.si, p.scale);
+    if (p.filhTag) {
+      state.shapeScalePosterFilh.set(`${p.filhTag}:${p.si}`, p.scale);
+      continue;
     }
+    const top = p.layer === 1 ? state.shapeScaleSubcontours1 : state.shapeScaleSubcontours2;
+    let inner = top.get(p.i);
+    if (!inner) {
+      inner = new Map();
+      top.set(p.i, inner);
+    }
+    inner.set(p.si, p.scale);
   }
 }
 
-function glyphCenterHalfSpanTimesFit(char, fontKit, axes, fkFeat, fit) {
+function filhramonieInkHalfHeightTimesFit(char, fontKit, axes, fit) {
   if (!fontKit || fit == null || !Number.isFinite(fit)) return null;
-  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, fkFeat);
+  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, { ss04: 1 });
   if (!g) return null;
-  const boxMinY = g.bottomY;
-  const boxMaxY = g.bottomY + g.height;
-  const half = Math.max(boxMaxY - g.pivotYCenter, g.pivotYCenter - boxMinY);
-  return half * fit;
+  return (g.height * fit) / 2;
 }
 
-function glyphHeightAboveBottomPivotTimesFit(char, fontKit, axes, fkFeat, fit) {
+function filhramonieInkFullHeightTimesFit(char, fontKit, axes, fit) {
   if (!fontKit || !Number.isFinite(fit)) return null;
-  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, fkFeat);
+  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, { ss04: 1 });
   if (!g) return null;
-  const boxMaxY = g.bottomY + g.height;
-  return Math.max(0, boxMaxY - g.pivotYBottom) * fit;
+  return g.height * fit;
 }
 
-function glyphMaxHalfWidthTimesFit(char, fontKit, axes, fkFeat, fit) {
+function filhramonieInkHalfWidthTimesFit(char, fontKit, axes, fit) {
   if (!fontKit || !Number.isFinite(fit)) return null;
-  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, fkFeat);
+  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, { ss04: 1 });
   if (!g) return null;
-  const minX = g.cx - g.width / 2;
-  const maxX = g.cx + g.width / 2;
-  return Math.max(g.pivotX - minX, maxX - g.pivotX) * fit;
+  return (g.width * fit) / 2;
 }
 
 function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2) {
@@ -2857,9 +2097,8 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
     const c1 = `rgb(${logo1Color[0]},${logo1Color[1]},${logo1Color[2]})`;
     const c2 = `rgb(${logo2Color[0]},${logo2Color[1]},${logo2Color[2]})`;
 
-    const fkFeat = layoutFeatureCssToFontKit(feature);
-    const glyph1 = getGlyphPathFromFontKit(font1, char, FONT_SIZE_LOAD, axes1, fkFeat);
-    const glyph2 = getGlyphPathFromFontKit(font2, char, FONT_SIZE_LOAD, axes2, fkFeat);
+    const glyph1 = getGlyphPathFromFontKit(font1, char, FONT_SIZE_LOAD, axes1, { ss04: 1 });
+    const glyph2 = getGlyphPathFromFontKit(font2, char, FONT_SIZE_LOAD, axes2, { ss04: 1 });
 
     debugAfter.push({
       i,
@@ -2871,8 +2110,32 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
       fitScale1,
       fitScale2,
       fitUnified,
-      glyph1: glyph1 ? { nContour: glyph1.contours.length, cx: glyph1.cx, cy: glyph1.cy, bottomY: glyph1.bottomY, pivotX: glyph1.pivotX, pivotYBottom: glyph1.pivotYBottom, pivotYCenter: glyph1.pivotYCenter, width: glyph1.width, height: glyph1.height } : null,
-      glyph2: glyph2 ? { nContour: glyph2.contours.length, cx: glyph2.cx, cy: glyph2.cy, bottomY: glyph2.bottomY, pivotX: glyph2.pivotX, pivotYBottom: glyph2.pivotYBottom, pivotYCenter: glyph2.pivotYCenter, width: glyph2.width, height: glyph2.height } : null
+      glyph1: glyph1
+        ? {
+            nContour: glyph1.contours.length,
+            cx: glyph1.cx,
+            cy: glyph1.cy,
+            bottomY: glyph1.bottomY,
+            pivotX: glyph1.pivotX,
+            pivotYBottom: glyph1.pivotYBottom,
+            pivotYCenter: glyph1.pivotYCenter,
+            width: glyph1.width,
+            height: glyph1.height
+          }
+        : null,
+      glyph2: glyph2
+        ? {
+            nContour: glyph2.contours.length,
+            cx: glyph2.cx,
+            cy: glyph2.cy,
+            bottomY: glyph2.bottomY,
+            pivotX: glyph2.pivotX,
+            pivotYBottom: glyph2.pivotYBottom,
+            pivotYCenter: glyph2.pivotYCenter,
+            width: glyph2.width,
+            height: glyph2.height
+          }
+        : null
     });
 
     const subOmit1 = state.shapeOmitSubcontours1 && state.shapeOmitSubcontours1.get(i);
@@ -2997,53 +2260,80 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
   const feature = posterFeatureKeyToCss(posterFeatureKey);
   const posterFk = posterFeatureKeyToFontKit(posterFeatureKey);
 
-  const stage1 = stageIndices1[0] % NUM_STAGES;
-  const stage2 = stageIndices2[0] % NUM_STAGES;
-  const axes1 = getAxesForLayer(state, 1, stage1);
-  const axes2 = getAxesForLayer(state, 2, stage2);
-  const variation1 = getVariationString(axes1);
-  const variation2 = getVariationString(axes2);
+  const st1 = stageIndices1[0] % NUM_STAGES;
+  const st2 = stageIndices2[0] % NUM_STAGES;
+  const sb1 = (stageIndices1[1] != null ? stageIndices1[1] : stageIndices1[0]) % NUM_STAGES;
+  const sb2 = (stageIndices2[1] != null ? stageIndices2[1] : stageIndices2[0]) % NUM_STAGES;
 
-  const letter = String(posterLetter || 'S').charAt(0);
-  const number = String(posterNumber || '1').charAt(0);
+  const axesTop1 = getAxesForLayer(state, 1, st1);
+  const axesTop2 = getAxesForLayer(state, 2, st2);
+  const axesBot1 = getAxesForLayer(state, 1, sb1);
+  const axesBot2 = getAxesForLayer(state, 2, sb2);
+  const variationTop1 = getVariationString(axesTop1);
+  const variationTop2 = getVariationString(axesTop2);
+  const variationBot1 = getVariationString(axesBot1);
+  const variationBot2 = getVariationString(axesBot2);
+
+  const letter = String(posterLetter || 'F').charAt(0);
 
   const availW = POSTER_W - 2 * POSTER_MARGIN;
   const availH = POSTER_H - 2 * POSTER_MARGIN;
   const centerX = POSTER_W / 2;
   const centerY = POSTER_H / 2;
+  const halfH = POSTER_H / 2;
 
-  const { w: w1, h: h1 } = measureGlyph(letter, fontName1, variation1, feature);
-  const { w: w2, h: h2 } = measureGlyph(number, fontName2, variation2, feature);
-  const maxW = Math.max(w1, w2);
-  const maxH = Math.max(h1, h2);
+  const mTop1 = measureGlyph(letter, fontName1, variationTop1, feature);
+  const mTop2 = measureGlyph(letter, fontName2, variationTop2, feature);
+  const mBot1 = measureGlyph(letter, fontName1, variationBot1, feature);
+  const mBot2 = measureGlyph(letter, fontName2, variationBot2, feature);
+  const maxW = Math.max(mTop1.w, mTop2.w, mBot1.w, mBot2.w);
+  const maxH = Math.max(mTop1.h, mTop2.h, mBot1.h, mBot2.h);
   const fitScale = Math.min(availW / maxW, availH / maxH) * (FONT_SIZE_LOAD / POSTER_FONT_SIZE);
 
-  const glyph1 = getGlyphPathFromFontKit(font1, letter, POSTER_FONT_SIZE, axes1, posterFk);
-  const glyph2 = getGlyphPathFromFontKit(font2, number, POSTER_FONT_SIZE, axes2, posterFk);
+  const glyphTop1 = getGlyphPathFromFontKit(font1, letter, POSTER_FONT_SIZE, axesTop1, posterFk);
+  const glyphTop2 = getGlyphPathFromFontKit(font2, letter, POSTER_FONT_SIZE, axesTop2, posterFk);
+  const glyphBot1 = getGlyphPathFromFontKit(font1, letter, POSTER_FONT_SIZE, axesBot1, posterFk);
+  const glyphBot2 = getGlyphPathFromFontKit(font2, letter, POSTER_FONT_SIZE, axesBot2, posterFk);
 
   const c1 = `rgb(${logo1Color[0]},${logo1Color[1]},${logo1Color[2]})`;
   const c2 = `rgb(${logo2Color[0]},${logo2Color[1]},${logo2Color[2]})`;
 
+  const clipSeq = ++cutoutSvgIdSeq;
+  const clipTop = `fh-poster-clipTop-${clipSeq}`;
+  const clipBot = `fh-poster-clipBot-${clipSeq}`;
+  const clipDefs = `<clipPath id="${clipTop}"><rect x="0" y="0" width="${POSTER_W}" height="${halfH}"/></clipPath>
+  <clipPath id="${clipBot}"><rect x="0" y="${halfH}" width="${POSTER_W}" height="${halfH}"/></clipPath>
+`;
+
   let layer1Paths = '';
   let layer2Paths = '';
 
-  if (layer1Visible && glyph1) {
-    const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyph1.pivotX},${-glyph1.pivotYCenter})`;
-    layer1Paths = '';
-    glyph1.contours.forEach((sub, si) => {
-      if (state.shapeOmitPosterSub1 && state.shapeOmitPosterSub1.has(si)) return;
-      const tr = `${trBase}${posterSubcontourLocalScaleSuffix(sub, glyph1.pivotX, glyph1.pivotYCenter, state.shapeScalePosterSub1, si)}`;
-      layer1Paths += `  <path data-sub="${si}" d="${escapeXmlAttr(sub.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
-    });
+  function posterGlyphToClippedGroup(glyph, fill, trBase, clipId, omitSet, filhTag) {
+    if (!glyph) return '';
+    const inner = glyph.contours
+      .map((sub, si) => {
+        if (omitSet && omitSet.has(si)) return '';
+        const tr = `${trBase}${filhPosterScaleSuffix(sub, glyph.pivotX, glyph.pivotYCenter, state.shapeScalePosterFilh, filhTag, si)}`;
+        return `<path d="${escapeXmlAttr(sub.pathData)}" fill="${fill}" transform="${tr}"/>`;
+      })
+      .join('');
+    return `  <g clip-path="url(#${clipId})">${inner}</g>\n`;
   }
-  if (layer2Visible && glyph2) {
-    const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyph2.pivotX},${-glyph2.pivotYCenter})`;
-    layer2Paths = '';
-    glyph2.contours.forEach((sub, si) => {
-      if (state.shapeOmitPosterSub2 && state.shapeOmitPosterSub2.has(si)) return;
-      const tr = `${trBase}${posterSubcontourLocalScaleSuffix(sub, glyph2.pivotX, glyph2.pivotYCenter, state.shapeScalePosterSub2, si)}`;
-      layer2Paths += `  <path data-sub="${si}" d="${escapeXmlAttr(sub.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
-    });
+  if (layer1Visible && glyphTop1) {
+    const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyphTop1.pivotX},${-glyphTop1.pivotYCenter})`;
+    layer1Paths += posterGlyphToClippedGroup(glyphTop1, c1, trBase, clipTop, state.shapeOmitPosterSub1, 'l1t');
+  }
+  if (layer1Visible && glyphBot1) {
+    const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyphBot1.pivotX},${-glyphBot1.pivotYCenter})`;
+    layer1Paths += posterGlyphToClippedGroup(glyphBot1, c1, trBase, clipBot, state.shapeOmitPosterSub1, 'l1b');
+  }
+  if (layer2Visible && glyphTop2) {
+    const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyphTop2.pivotX},${-glyphTop2.pivotYCenter})`;
+    layer2Paths += posterGlyphToClippedGroup(glyphTop2, c2, trBase, clipTop, state.shapeOmitPosterSub2, 'l2t');
+  }
+  if (layer2Visible && glyphBot2) {
+    const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyphBot2.pivotX},${-glyphBot2.pivotYCenter})`;
+    layer2Paths += posterGlyphToClippedGroup(glyphBot2, c2, trBase, clipBot, state.shapeOmitPosterSub2, 'l2b');
   }
 
   const usePosterPairCut = state.posterRandomPairCutout && layer1Paths && layer2Paths;
@@ -3055,7 +2345,7 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
 <svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 <defs>
-${defInner}
+${clipDefs}${defInner}
 </defs>
 <rect width="100%" height="100%" fill="none" filter="url(#${pid.filt})"/>
 </svg>`;
@@ -3063,6 +2353,8 @@ ${defInner}
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
+<defs>
+${clipDefs}</defs>
 <g id="layer1">\n${layer1Paths}</g>
 <g id="layer2" style="mix-blend-mode:multiply">\n${layer2Paths}</g>
 </svg>`;
@@ -3076,7 +2368,7 @@ async function convertToShapes(state, stageIndices1, stageIndices2, getPosterInp
   const font2 = await loadFontKit(fontUrl2);
   const posterInputs = getPosterInputs();
   const layout = convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2);
-  const posterSvg = convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2, posterInputs.letter, posterInputs.number);
+  const posterSvg = convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2, posterInputs.letter, posterInputs.number, posterInputs.featureKey);
   return { ...layout, posterSvg };
 }
 
@@ -3110,6 +2402,7 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
     wrap.className = cutout ? 'layout-wrapper layout-cutout-view' : 'layout-wrapper layout-shapes-view';
     wrap.style.cssText = `position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; background: ${canvasBg};`;
     wrap.innerHTML = svgPart(layoutSvg);
+    applyLayoutShapesDisplayScale(wrap.querySelector('svg'));
     scaleLayoutToFit(layoutContainer);
     requestAnimationFrame(() => {
       scaleLayoutToFit(layoutContainer);
@@ -3296,12 +2589,6 @@ export function initLayout(containerId) {
       }
       await document.fonts.ready;
 
-      try {
-        await Promise.all([resolveLayoutFontKit(fontName1), resolveLayoutFontKit(fontName2)]);
-      } catch (e) {
-        console.warn('FontKit preload (layout paths):', e);
-      }
-
       const geomDefaultFont = computeLayoutScreenGeometry(parsedD);
       const geomDefaultExport = computeLayoutScreenGeometry(parsedStart);
 
@@ -3385,42 +2672,16 @@ export function initLayout(containerId) {
         posterRandomPairCutout: false,
         shapeScaleSubcontours1: new Map(),
         shapeScaleSubcontours2: new Map(),
-        shapeScalePosterSub1: new Map(),
-        shapeScalePosterSub2: new Map(),
+        shapeScalePosterFilh: new Map(),
         textureBlurPx: 0,
-        textureBlurLayer1: true,
-        textureBlurLayer2: true,
-        textureRadialAmount1: 0,
-        textureRadialAmount2: 0,
-        textureFillLayer1: true,
-        textureFillLayer2: true,
-        textureGradientKind1: 'radial',
-        textureGradientKind2: 'radial',
-        textureGradientInvert1: false,
-        textureGradientInvert2: false,
-        textureGradientAngle1: 90,
-        textureGradientAngle2: 90,
-        texturePatternEnabled1: false,
-        texturePatternEnabled2: false,
-        texturePatternKind1: 'stripes',
-        texturePatternKind2: 'stripes',
-        texturePatternStripesAngle1: 45,
-        texturePatternStripesAngle2: 330,
-        texturePatternStripesPeriod1: 14,
-        texturePatternStripesPeriod2: 18,
-        texturePatternStripesRatio1: 0.45,
-        texturePatternStripesRatio2: 0.5,
-        texturePatternBitmapUrl1: '',
-        texturePatternBitmapUrl2: '',
-        texturePatternBitmapScale1: 100,
-        texturePatternBitmapScale2: 100,
-        texturePatternBitmapPerShape1: false,
-        texturePatternBitmapPerShape2: false
+        textureBlurMode: 'both',
+        textureRadialAmount: 0,
+        textureRadialMode: 'both'
       };
 
       const getPosterInputs = () => ({
-        letter: document.getElementById('poster-letter')?.value || 'S',
-        number: document.getElementById('poster-number')?.value || '1',
+        letter: document.getElementById('poster-letter')?.value || 'F',
+        number: '',
         featureKey: document.getElementById('poster-feature')?.value || 'normal'
       });
 
@@ -3493,12 +2754,10 @@ export function initLayout(containerId) {
         const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
         if (blurRangeEl) blurRangeEl.value = String(state.textureBlurPx ?? 0);
         if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx ?? 0} px`;
-        const blurL1 = document.getElementById('layout-texture-blur-l1');
-        const blurL2 = document.getElementById('layout-texture-blur-l2');
-        if (blurL1) blurL1.checked = !!state.textureBlurLayer1;
-        if (blurL2) blurL2.checked = !!state.textureBlurLayer2;
-        syncTextureGradientControlsFromState(state);
-        syncTexturePatternControlsFromState(state);
+        const radialRangeEl = document.getElementById('layout-texture-radial-amount');
+        const radialLabelEl = document.getElementById('layout-texture-radial-amount-label');
+        if (radialRangeEl) radialRangeEl.value = String(state.textureRadialAmount ?? 0);
+        if (radialLabelEl) radialLabelEl.textContent = `Radiální přechod: ${state.textureRadialAmount ?? 0}`;
         syncTextureBlur(state);
         syncTextureRadial(state);
       };
@@ -3715,11 +2974,6 @@ export function initLayout(containerId) {
         await document.fonts.ready;
         state.fontName1 = name1;
         state.fontName2 = name2;
-        try {
-          await Promise.all([resolveLayoutFontKit(name1), resolveLayoutFontKit(name2)]);
-        } catch (e) {
-          console.warn('FontKit:', e);
-        }
         const cap = state.oppositeLayerStyling ? 2 : NUM_STAGES;
         const { stageIndices1: s1, stageIndices2: s2 } = createStageIndices('unifyCuts', numPoints, pointIds, cap);
         stageIndices1.splice(0, stageIndices1.length, ...s1);
@@ -3819,10 +3073,6 @@ export function initLayout(containerId) {
           if (!pool.length) {
             console.info('[Omit tvary] Žádné více-konturové tvary v aktuálním výběru — nic k náhodnému vynechání.');
           }
-        } catch (e) {
-          console.error('[Omit tvary] příprava výběru selhala:', e);
-        }
-        try {
           syncLayoutGeometry(state);
           const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
           if (shapes) {
@@ -3856,7 +3106,11 @@ export function initLayout(containerId) {
         } catch (e) {
           console.error('Random omit shapes failed:', e);
           layoutDtable([
-            { error: String(e?.message || e), pool_kontur: pickMeta.poolSize, vyber: pickMeta.picksStr }
+            {
+              error: String(e?.message || e),
+              pool_kontur: pickMeta.poolSize,
+              vyber: pickMeta.picksStr
+            }
           ]);
         } finally {
           syncExportButtons();
@@ -3940,7 +3194,7 @@ export function initLayout(containerId) {
         try {
           const font1 = await loadFontKit(fontUrl1);
           const font2 = await loadFontKit(fontUrl2);
-          const pool = collectSubcontourScalePool(state, stageIndices1, stageIndices2, font1, font2, getPosterInputs);
+          const pool = collectFilhSubcontourScalePool(state, stageIndices1, stageIndices2, font1, font2, getPosterInputs);
           const pickN = randomOmitPickCount(pool.length);
           const pickIdx = pickRandomDistinctIndices(pickN, pool.length);
           const scaledPicks = pickIdx.map((j) => {
@@ -4061,11 +3315,6 @@ export function initLayout(containerId) {
             await loadFont(f2);
             state.fontName1 = f1;
             state.fontName2 = f2;
-            try {
-              await Promise.all([resolveLayoutFontKit(f1), resolveLayoutFontKit(f2)]);
-            } catch (e) {
-              console.warn('FontKit:', e);
-            }
             state.randomizeStyling = true;
             state.extremeStyling = false;
             state.oppositeLayerStyling = false;
@@ -4088,11 +3337,6 @@ export function initLayout(containerId) {
             await loadFont(next2);
             state.fontName1 = next1;
             state.fontName2 = next2;
-            try {
-              await Promise.all([resolveLayoutFontKit(next1), resolveLayoutFontKit(next2)]);
-            } catch (e) {
-              console.warn('FontKit:', e);
-            }
             reRender();
           } catch (e) {
             console.warn('Failed to load font:', next1, next2, e);
@@ -4108,11 +3352,6 @@ export function initLayout(containerId) {
           try {
             await loadFont(next1);
             state.fontName1 = next1;
-            try {
-              await resolveLayoutFontKit(next1);
-            } catch (e) {
-              console.warn('FontKit:', e);
-            }
             reRender();
           } catch (e) {
             console.warn('Failed to load font:', next1, e);
@@ -4128,11 +3367,6 @@ export function initLayout(containerId) {
           try {
             await loadFont(next2);
             state.fontName2 = next2;
-            try {
-              await resolveLayoutFontKit(next2);
-            } catch (e) {
-              console.warn('FontKit:', e);
-            }
             reRender();
           } catch (e) {
             console.warn('Failed to load font:', next2, e);
@@ -4189,11 +3423,6 @@ export function initLayout(containerId) {
             await loadFont(next2);
             state.fontName1 = next1;
             state.fontName2 = next2;
-            try {
-              await Promise.all([resolveLayoutFontKit(next1), resolveLayoutFontKit(next2)]);
-            } catch (e) {
-              console.warn('FontKit:', e);
-            }
           } catch (e) {
             console.warn('Failed to load font:', next1, next2, e);
           }
@@ -4206,10 +3435,6 @@ export function initLayout(containerId) {
           state.logo2Color = state.palette[state.idx2];
           reRender();
         });
-      });
-
-      document.getElementById('layout-btn-random-effects')?.addEventListener('click', () => {
-        applyRandomTextureEffectsCombo(state);
       });
 
       const resizeHandler = () => {
@@ -4242,217 +3467,58 @@ export function initLayout(containerId) {
       });
 
       document.getElementById('layout-texture-blur-random-layer')?.addEventListener('click', () => {
-        applyRandomTextureBlur(state);
-      });
-
-      document.getElementById('layout-texture-blur-l1')?.addEventListener('change', (e) => {
-        state.textureBlurLayer1 = !!e.target.checked;
+        const v1 = state.layer1Visible;
+        const v2 = state.layer2Visible;
+        if (v1 && v2) state.textureBlurMode = Math.random() < 0.5 ? 'layer1' : 'layer2';
+        else if (v1) state.textureBlurMode = 'layer1';
+        else if (v2) state.textureBlurMode = 'layer2';
+        else state.textureBlurMode = 'both';
+        const blurRangeEl = document.getElementById('layout-texture-blur-amount');
+        const max = Number(blurRangeEl?.max) || 16;
+        const min = Number(blurRangeEl?.min) || 0;
+        const step = Number(blurRangeEl?.step) || 1;
+        const steps = Math.floor((max - min) / step) + 1;
+        state.textureBlurPx = min + Math.floor(Math.random() * steps) * step;
+        if (blurRangeEl) blurRangeEl.value = String(state.textureBlurPx);
+        const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
+        if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx} px`;
         syncTextureBlur(state);
       });
-      document.getElementById('layout-texture-blur-l2')?.addEventListener('change', (e) => {
-        state.textureBlurLayer2 = !!e.target.checked;
+
+      document.getElementById('layout-texture-blur-all')?.addEventListener('click', () => {
+        state.textureBlurMode = 'both';
         syncTextureBlur(state);
       });
 
-      document.getElementById('layout-texture-radial-amount-1')?.addEventListener('input', (e) => {
-        state.textureRadialAmount1 = Number(e.target.value) || 0;
-        const radialLabelEl1 = document.getElementById('layout-texture-radial-amount-1-label');
-        if (radialLabelEl1) radialLabelEl1.textContent = `V1 gradient: ${state.textureRadialAmount1}`;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-radial-amount-2')?.addEventListener('input', (e) => {
-        state.textureRadialAmount2 = Number(e.target.value) || 0;
-        const radialLabelEl2 = document.getElementById('layout-texture-radial-amount-2-label');
-        if (radialLabelEl2) radialLabelEl2.textContent = `V2 gradient: ${state.textureRadialAmount2}`;
+      document.getElementById('layout-texture-radial-amount')?.addEventListener('input', (e) => {
+        state.textureRadialAmount = Number(e.target.value) || 0;
+        const radialLabelEl = document.getElementById('layout-texture-radial-amount-label');
+        if (radialLabelEl) radialLabelEl.textContent = `Radiální přechod: ${state.textureRadialAmount}`;
         syncTextureRadial(state);
       });
 
       document.getElementById('layout-texture-radial-random-layer')?.addEventListener('click', () => {
-        applyRandomTextureGradient(state);
-      });
-
-      document.getElementById('layout-texture-fill-l1')?.addEventListener('change', (e) => {
-        state.textureFillLayer1 = !!e.target.checked;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-fill-l2')?.addEventListener('change', (e) => {
-        state.textureFillLayer2 = !!e.target.checked;
-        syncTextureRadial(state);
-      });
-
-      const bindGradKindRadios = (radId, linId, key) => {
-        document.getElementById(radId)?.addEventListener('change', (e) => {
-          if (!e.target.checked) return;
-          state[key] = 'radial';
-          syncTextureSubpanelVisibility(state);
-          syncTextureRadial(state);
-        });
-        document.getElementById(linId)?.addEventListener('change', (e) => {
-          if (!e.target.checked) return;
-          state[key] = 'linear';
-          syncTextureSubpanelVisibility(state);
-          syncTextureRadial(state);
-        });
-      };
-      bindGradKindRadios('layout-texture-grad-1-radial', 'layout-texture-grad-1-linear', 'textureGradientKind1');
-      bindGradKindRadios('layout-texture-grad-2-radial', 'layout-texture-grad-2-linear', 'textureGradientKind2');
-
-      document.getElementById('layout-texture-linear-angle-1')?.addEventListener('input', (e) => {
-        state.textureGradientAngle1 = Number(e.target.value) || 0;
-        const linAngLabel1 = document.getElementById('layout-texture-linear-angle-1-label');
-        if (linAngLabel1) linAngLabel1.textContent = `Směr: ${state.textureGradientAngle1}°`;
+        const v1 = state.layer1Visible;
+        const v2 = state.layer2Visible;
+        if (v1 && v2) state.textureRadialMode = Math.random() < 0.5 ? 'layer1' : 'layer2';
+        else if (v1) state.textureRadialMode = 'layer1';
+        else if (v2) state.textureRadialMode = 'layer2';
+        else state.textureRadialMode = 'both';
+        const radialRangeEl = document.getElementById('layout-texture-radial-amount');
+        const max = Number(radialRangeEl?.max) || 16;
+        const min = Number(radialRangeEl?.min) || 0;
+        const step = Number(radialRangeEl?.step) || 1;
+        const steps = Math.floor((max - min) / step) + 1;
+        state.textureRadialAmount = min + Math.floor(Math.random() * steps) * step;
+        if (radialRangeEl) radialRangeEl.value = String(state.textureRadialAmount);
+        const radialLabelEl = document.getElementById('layout-texture-radial-amount-label');
+        if (radialLabelEl) radialLabelEl.textContent = `Radiální přechod: ${state.textureRadialAmount}`;
         syncTextureRadial(state);
       });
 
-      document.getElementById('layout-texture-linear-angle-2')?.addEventListener('input', (e) => {
-        state.textureGradientAngle2 = Number(e.target.value) || 0;
-        const linAngLabel2 = document.getElementById('layout-texture-linear-angle-2-label');
-        if (linAngLabel2) linAngLabel2.textContent = `Směr: ${state.textureGradientAngle2}°`;
+      document.getElementById('layout-texture-radial-all')?.addEventListener('click', () => {
+        state.textureRadialMode = 'both';
         syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-radial-light-center-1')?.addEventListener('click', () => {
-        state.textureGradientInvert1 = false;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-radial-light-edge-1')?.addEventListener('click', () => {
-        state.textureGradientInvert1 = true;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-radial-light-center-2')?.addEventListener('click', () => {
-        state.textureGradientInvert2 = false;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-radial-light-edge-2')?.addEventListener('click', () => {
-        state.textureGradientInvert2 = true;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-pat-enable-1')?.addEventListener('change', (e) => {
-        state.texturePatternEnabled1 = !!e.target.checked;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-enable-2')?.addEventListener('change', (e) => {
-        state.texturePatternEnabled2 = !!e.target.checked;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-bitmap-per-shape-1')?.addEventListener('change', (e) => {
-        state.texturePatternBitmapPerShape1 = !!e.target.checked;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-bitmap-per-shape-2')?.addEventListener('change', (e) => {
-        state.texturePatternBitmapPerShape2 = !!e.target.checked;
-        syncTextureRadial(state);
-      });
-
-      const bindPatKind = (stripId, bitId, kindKey) => {
-        document.getElementById(stripId)?.addEventListener('change', (e) => {
-          if (!e.target.checked) return;
-          state[kindKey] = 'stripes';
-          syncTextureSubpanelVisibility(state);
-          syncTextureRadial(state);
-        });
-        document.getElementById(bitId)?.addEventListener('change', (e) => {
-          if (!e.target.checked) return;
-          state[kindKey] = 'bitmap';
-          syncTextureSubpanelVisibility(state);
-          syncTextureRadial(state);
-        });
-      };
-      bindPatKind('layout-texture-pat-stripes-1', 'layout-texture-pat-bitmap-1', 'texturePatternKind1');
-      bindPatKind('layout-texture-pat-stripes-2', 'layout-texture-pat-bitmap-2', 'texturePatternKind2');
-
-      document.getElementById('layout-texture-pat-angle-1')?.addEventListener('input', (e) => {
-        state.texturePatternStripesAngle1 = Number(e.target.value) || 0;
-        const el = document.getElementById('layout-texture-pat-angle-1-label');
-        if (el) el.textContent = `Úhel pruhů: ${state.texturePatternStripesAngle1}°`;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-period-1')?.addEventListener('input', (e) => {
-        state.texturePatternStripesPeriod1 = Math.max(4, Number(e.target.value) || 14);
-        const el = document.getElementById('layout-texture-pat-period-1-label');
-        if (el) el.textContent = `Rozteč: ${state.texturePatternStripesPeriod1}px`;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-ratio-1')?.addEventListener('input', (e) => {
-        const pct = Math.max(10, Math.min(90, Number(e.target.value) || 45));
-        state.texturePatternStripesRatio1 = pct / 100;
-        const el = document.getElementById('layout-texture-pat-ratio-1-label');
-        if (el) el.textContent = `Šířka pruhu: ${pct}%`;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-bitmap-scale-1')?.addEventListener('input', (e) => {
-        state.texturePatternBitmapScale1 = Math.max(25, Math.min(200, Number(e.target.value) || 100));
-        const el = document.getElementById('layout-texture-pat-bitmap-scale-1-label');
-        if (el) el.textContent = `Dlaždice: ${state.texturePatternBitmapScale1}%`;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-pat-angle-2')?.addEventListener('input', (e) => {
-        state.texturePatternStripesAngle2 = Number(e.target.value) || 0;
-        const el = document.getElementById('layout-texture-pat-angle-2-label');
-        if (el) el.textContent = `Úhel pruhů: ${state.texturePatternStripesAngle2}°`;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-period-2')?.addEventListener('input', (e) => {
-        state.texturePatternStripesPeriod2 = Math.max(4, Number(e.target.value) || 14);
-        const el = document.getElementById('layout-texture-pat-period-2-label');
-        if (el) el.textContent = `Rozteč: ${state.texturePatternStripesPeriod2}px`;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-ratio-2')?.addEventListener('input', (e) => {
-        const pct = Math.max(10, Math.min(90, Number(e.target.value) || 45));
-        state.texturePatternStripesRatio2 = pct / 100;
-        const el = document.getElementById('layout-texture-pat-ratio-2-label');
-        if (el) el.textContent = `Šířka pruhu: ${pct}%`;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-bitmap-scale-2')?.addEventListener('input', (e) => {
-        state.texturePatternBitmapScale2 = Math.max(25, Math.min(200, Number(e.target.value) || 100));
-        const el = document.getElementById('layout-texture-pat-bitmap-scale-2-label');
-        if (el) el.textContent = `Dlaždice: ${state.texturePatternBitmapScale2}%`;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-pat-bitmap-file-1')?.addEventListener('change', (e) => {
-        const f = e.target.files?.[0];
-        if (!f || !String(f.type || '').startsWith('image/')) {
-          e.target.value = '';
-          return;
-        }
-        revokeTexturePatternBitmap(state, 1);
-        state.texturePatternBitmapUrl1 = URL.createObjectURL(f);
-        e.target.value = '';
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-bitmap-clear-1')?.addEventListener('click', () => {
-        revokeTexturePatternBitmap(state, 1);
-        syncTexturePatternControlsFromState(state);
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-bitmap-file-2')?.addEventListener('change', (e) => {
-        const f = e.target.files?.[0];
-        if (!f || !String(f.type || '').startsWith('image/')) {
-          e.target.value = '';
-          return;
-        }
-        revokeTexturePatternBitmap(state, 2);
-        state.texturePatternBitmapUrl2 = URL.createObjectURL(f);
-        e.target.value = '';
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-bitmap-clear-2')?.addEventListener('click', () => {
-        revokeTexturePatternBitmap(state, 2);
-        syncTexturePatternControlsFromState(state);
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-pattern-random')?.addEventListener('click', () => {
-        applyRandomTexturePattern(state);
       });
     })
     .catch((err) => {
@@ -4461,23 +3527,6 @@ export function initLayout(containerId) {
         container.innerHTML = `<p style="padding:1rem;color:#c00;">Nepodařilo se načíst rozložení: ${err.message}. Zkontrolujte konzoli.</p>`;
       }
     });
-}
-
-if (typeof window !== 'undefined') {
-  window.layoutDebugOn = () => {
-    try {
-      localStorage.setItem(LAYOUT_DEBUG_STORAGE_KEY, '1');
-    } catch {}
-    window.__LAYOUT_DEBUG = true;
-    console.info('[Layout] Verbose console: ON (persist reload). OFF: layoutDebugOff() · URL: ?layoutDebug=1');
-  };
-  window.layoutDebugOff = () => {
-    try {
-      localStorage.removeItem(LAYOUT_DEBUG_STORAGE_KEY);
-    } catch {}
-    window.__LAYOUT_DEBUG = false;
-    console.info('[Layout] Verbose console: OFF');
-  };
 }
 
 document.addEventListener('DOMContentLoaded', () => {

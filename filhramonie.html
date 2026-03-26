@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Datatype:wght@100..900&display=swap" rel="stylesheet">
+  <title>FilHRAmonie – Bertin</title>
+  <link rel="stylesheet" href="/src/style.scss">
+</head>
+<body class="app-page layout-page">
+  <div class="layout-workspace">
+    <aside class="layout-sidebar" aria-label="Nabídka a nástroje">
+      <div class="layout-sidebar-col layout-sidebar-col--pages">
+        <nav class="layout-page-list">
+          <ul>
+            <li><a href="index.html">Rozložení loga</a></li>
+            <li><a href="filhramonie.html" aria-current="page">FilHRAmonie</a></li>
+            <li><a href="testing.html">Testování</a></li>
+            <li><a href="forum.html">Forum</a></li>
+          </ul>
+        </nav>
+        <div class="layout-sidebar-fill"></div>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-css-row">
+          <div class="layout-css-col">
+            <p id="layout-font-info-1"></p>
+            <pre id="layout-css-layer1"></pre>
+          </div>
+          <div class="layout-css-col">
+            <p id="layout-font-info-2"></p>
+            <pre id="layout-css-layer2"></pre>
+          </div>
+        </div>
+        <div class="layout-css-row">
+          <div class="layout-css-col">
+            <p id="layout-font-info-poster-top1"></p>
+            <pre id="layout-css-poster-top1"></pre>
+          </div>
+          <div class="layout-css-col">
+            <p id="layout-font-info-poster-top2"></p>
+            <pre id="layout-css-poster-top2"></pre>
+          </div>
+        </div>
+        <div class="layout-css-row">
+          <div class="layout-css-col">
+            <p id="layout-font-info-poster-bot1"></p>
+            <pre id="layout-css-poster-bot1"></pre>
+          </div>
+          <div class="layout-css-col">
+            <p id="layout-font-info-poster-bot2"></p>
+            <pre id="layout-css-poster-bot2"></pre>
+          </div>
+        </div>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-poster-inputs">
+          <label><input type="text" id="poster-letter" value="F" maxlength="1" /> Písmeno (plakát)</label>
+          <label><select id="poster-feature">
+            <option value="normal" selected>Bertin (základní)</option>
+            <option value="ss01">ss01</option>
+            <option value="ss02">ss02</option>
+            <option value="ss03">ss03</option>
+            <option value="ss04">ss04</option>
+          </select> Stylistické sady</label>
+        </div>
+      </div>
+      <div class="layout-sidebar-col layout-sidebar-col--tools">
+        <p class="layout-footer-buttons">
+          <button type="button" id="layout-btn-unify">Sjednotit</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-symmetrical">Symetrické</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-unify-cuts">Sjednotit rezy</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-layer1">Vrstva 1</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-layer2">Vrstva 2</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-random-omit-shapes">Náhodně vynechat tvary</button><br />
+          <button type="button" id="layout-btn-random-pair-cutout">Výřez překryvů (všechny)</button><br />
+          <button type="button" id="layout-btn-restore-all-shapes">Obnovit všechny tvary</button><br />
+          <button type="button" id="layout-btn-random-scale-shapes">Náhodně měnit měřítko tvarů</button><br />
+          <button type="button" id="layout-btn-restore-scale-shapes">Obnovit měřítko tvarů</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-randomize">Náhodný styl</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-extreme">Náhodná extrémní</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-extreme-opposite">Protiklady vrstev</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-orientation-axes">Orientace tečka + čtverec</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-typeface">Změnit řez Vrstva 1+2</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-typeface-1">Změnit řez Vrstva 1</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-typeface-2">Změnit řez Vrstva 2</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-colors">Náhodné barvy</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-randomize-all">Náhodně vše</button>
+        </p>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-palette layout-palette-topright layout-palette-panel">
+          <ul class="layout-palette-list">
+            <li class="layout-palette-line">
+              <span class="layout-palette-label">Vrstva 1</span>
+              <div class="layout-palette-swatch" id="layout-layer1-swatch"></div>
+            </li>
+            <li class="layout-palette-line">
+              <span class="layout-palette-label">Vrstva 2</span>
+              <div class="layout-palette-swatch" id="layout-layer2-swatch"></div>
+            </li>
+            <li class="layout-palette-line">
+              <span class="layout-palette-label">Paleta</span>
+              <div class="layout-palette-swatches" id="layout-palette-swatches"></div>
+            </li>
+            <li class="layout-palette-line layout-palette-line--buttons">
+              <button type="button" id="layout-btn-save-palette">Uložit paletu</button>
+              <button type="button" id="layout-btn-reset-palette">Obnovit</button>
+            </li>
+            <li class="layout-palette-line">
+              <span class="layout-palette-label">Pozadí plátna</span>
+              <div class="layout-palette-swatch" id="layout-canvas-bg-swatch"></div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+    <main class="layout-main-two">
+      <div id="layout-canvas"></div>
+      <div class="layout-poster-pane">
+        <div id="poster-canvas"></div>
+      </div>
+    </main>
+  </div>
+
+  <ul class="export-popup">
+    <li><button type="button" id="layout-btn-convert">Krok 1: Převést na tvary</button></li>
+    <li><button type="button" id="layout-btn-png-logo" disabled>Krok 2: Exportovat PNG — Logo</button></li>
+    <li><button type="button" id="layout-btn-png-plakat" disabled>Krok 2: Exportovat PNG — Plakát</button></li>
+    <li><button type="button" id="layout-btn-svg-logo" disabled>Krok 2: Exportovat SVG — Logo</button></li>
+    <li><button type="button" id="layout-btn-svg-plakat" disabled>Krok 2: Exportovat SVG — Plakát</button></li>
+  </ul>
+
+  <script type="module" src="/src/filhramonie.js"></script>
+</body>
+</html>

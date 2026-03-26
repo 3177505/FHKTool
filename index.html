@@ -7,89 +7,229 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Datatype:wght@100..900&display=swap" rel="stylesheet">
   <title>Bertin Logo – Rozložení</title>
-  <link rel="preload" href="fonts/205TF-Bertin-DotSizeVAR.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="/src/style.scss">
 </head>
-<body class="layout-page">
-  <header class="layout-header">
-    <div class="layout-header-row">
-      <p><a href="index.html">Rozložení loga</a> · <a href="testing.html">Testování</a> · <a href="forum.html">Forum</a></p>
-      <div class="layout-palette layout-palette-topright layout-palette-panel">
-        <ul class="layout-palette-list">
-          <li class="layout-palette-line">
-            <span class="layout-palette-label">Vrstva 1</span>
-            <div class="layout-palette-swatch" id="layout-layer1-swatch"></div>
-          </li>
-          <li class="layout-palette-line">
-            <span class="layout-palette-label">Vrstva 2</span>
-            <div class="layout-palette-swatch" id="layout-layer2-swatch"></div>
-          </li>
-          <li class="layout-palette-line">
-            <span class="layout-palette-label">Paleta</span>
-            <div class="layout-palette-swatches" id="layout-palette-swatches"></div>
-          </li>
-          <li class="layout-palette-line layout-palette-line--buttons">
-            <button type="button" id="layout-btn-save-palette">Uložit paletu</button>
-            <button type="button" id="layout-btn-reset-palette">Obnovit</button>
-          </li>
-          <li class="layout-palette-line">
-            <span class="layout-palette-label">Pozadí plátna</span>
-            <div class="layout-palette-swatch" id="layout-canvas-bg-swatch"></div>
-          </li>
-        </ul>
+<body class="app-page layout-page">
+  <div class="layout-workspace">
+    <aside class="layout-sidebar" aria-label="Nabídka a nástroje">
+      <div class="layout-sidebar-col layout-sidebar-col--pages">
+        <nav class="layout-page-list">
+          <ul>
+            <li><a href="index.html">Rozložení loga</a></li>
+            <li><a href="filhramonie.html">FilHRAmonie</a></li>
+            <li><a href="testing.html">Testování</a></li>
+            <li><a href="forum.html">Forum</a></li>
+          </ul>
+        </nav>
+        <div class="layout-sidebar-fill"></div>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-css-row">
+          <div class="layout-css-col">
+            <p id="layout-font-info-1"></p>
+            <pre id="layout-css-layer1"></pre>
+          </div>
+          <div class="layout-css-col">
+            <p id="layout-font-info-2"></p>
+            <pre id="layout-css-layer2"></pre>
+          </div>
+        </div>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-poster-inputs">
+          <label><input type="text" id="poster-letter" value="S" maxlength="1" /> Písmeno</label>
+          <label><input type="text" id="poster-number" value="1" maxlength="1" /> Číslo</label>
+          <label><select id="poster-feature">
+            <option value="normal" selected>Bertin (základní)</option>
+            <option value="ss01">ss01</option>
+            <option value="ss02">ss02</option>
+            <option value="ss03">ss03</option>
+            <option value="ss04">ss04</option>
+          </select> Stylistické sady</label>
+        </div>
       </div>
-    </div>
-    <div class="layout-poster-inputs">
-      <label><input type="text" id="poster-letter" value="S" maxlength="1" /> Písmeno</label>
-      <label><input type="text" id="poster-number" value="1" maxlength="1" /> Číslo</label>
-      <label><select id="poster-feature">
-        <option value="normal" selected>Bertin (základní)</option>
-        <option value="ss01">ss01</option>
-        <option value="ss02">ss02</option>
-        <option value="ss03">ss03</option>
-        <option value="ss04">ss04</option>
-      </select> Stylistické sady</label>
-    </div>
-  </header> 
-
-  <main class="layout-main-two">
-    <div id="layout-canvas"></div>
-    <div id="poster-canvas"></div>
-  </main>
+      <div class="layout-sidebar-col layout-sidebar-col--tools">
+        <p class="layout-footer-buttons">
+          <button type="button" id="layout-btn-unify">Sjednotit</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-symmetrical">Symetrické</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-unify-cuts">Sjednotit rezy</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-layer1">Vrstva 1</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-layer2">Vrstva 2</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-random-pair-cutout">Výřez překryvů</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-random-omit-shapes">Náhodně vynechat tvary</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-restore-all-shapes">Obnovit všechny tvary</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-random-scale-shapes">Náhodně měnit měřítko tvarů</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-restore-scale-shapes">Obnovit měřítko tvarů</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-randomize">Náhodný styl</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-extreme">Náhodná extrémní</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-extreme-opposite">Protiklady vrstev</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-orientation-axes">Orientace tečka + čtverec</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-typeface">Změnit řez Vrstva 1+2</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-typeface-1">Změnit řez Vrstva 1</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-typeface-2">Změnit řez Vrstva 2</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-colors">Náhodné barvy</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-random-effects">Náhodné efekty</button>
+          <button type="button" id="layout-btn-randomize-all">Náhodně vše</button>
+        </p>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-poster-inputs">
+          <label><span id="layout-texture-blur-amount-label"></span> <input type="range" id="layout-texture-blur-amount" min="0" max="16" step="1" value="0" /></label>
+          <p class="layout-footer-buttons">
+            <label><input type="checkbox" id="layout-texture-blur-l1" checked /> Rozostření V1</label><span class="btn-sep">·</span>
+            <label><input type="checkbox" id="layout-texture-blur-l2" checked /> Rozostření V2</label><span class="btn-sep">·</span>
+            <button type="button" id="layout-texture-blur-random-layer">Náhodně</button>
+          </p>
+        </div>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-poster-inputs">
+          <p class="layout-footer-buttons">
+            <button type="button" id="layout-texture-radial-random-layer">Gradient — náhodně</button>
+          </p>
+          <details class="layout-texture-grad-details">
+            <summary>Gradient — Vrstva 1</summary>
+            <p class="layout-footer-buttons">
+              <label><input type="checkbox" id="layout-texture-fill-l1" checked /> Gradient V1</label>
+            </p>
+            <label><span id="layout-texture-radial-amount-1-label"></span> <input type="range" id="layout-texture-radial-amount-1" min="0" max="16" step="1" value="0" /></label>
+            <p class="layout-footer-buttons">
+              <label><input type="radio" name="layout-tex-grad-1" id="layout-texture-grad-1-radial" value="radial" checked /> Radiální</label><span class="btn-sep">·</span>
+              <label><input type="radio" name="layout-tex-grad-1" id="layout-texture-grad-1-linear" value="linear" /> Lineární</label>
+            </p>
+            <div id="layout-tex-grad-linear-wrap-1" class="layout-tex-subsection" hidden>
+              <p class="layout-tex-subsection-title">Lineární · směr</p>
+              <label><span id="layout-texture-linear-angle-1-label"></span> <input type="range" id="layout-texture-linear-angle-1" min="0" max="360" step="1" value="90" /></label>
+            </div>
+            <div id="layout-tex-grad-radial-wrap-1" class="layout-tex-subsection">
+              <p class="layout-tex-subsection-title">Radiální · světlost</p>
+              <p class="layout-footer-buttons">
+                <button type="button" id="layout-texture-radial-light-center-1">Světlý střed</button><span class="btn-sep">·</span>
+                <button type="button" id="layout-texture-radial-light-edge-1">Světlý okraj</button>
+              </p>
+            </div>
+          </details>
+          <details class="layout-texture-grad-details">
+            <summary>Gradient — Vrstva 2</summary>
+            <p class="layout-footer-buttons">
+              <label><input type="checkbox" id="layout-texture-fill-l2" checked /> Gradient V2</label>
+            </p>
+            <label><span id="layout-texture-radial-amount-2-label"></span> <input type="range" id="layout-texture-radial-amount-2" min="0" max="16" step="1" value="0" /></label>
+            <p class="layout-footer-buttons">
+              <label><input type="radio" name="layout-tex-grad-2" id="layout-texture-grad-2-radial" value="radial" checked /> Radiální</label><span class="btn-sep">·</span>
+              <label><input type="radio" name="layout-tex-grad-2" id="layout-texture-grad-2-linear" value="linear" /> Lineární</label>
+            </p>
+            <div id="layout-tex-grad-linear-wrap-2" class="layout-tex-subsection" hidden>
+              <p class="layout-tex-subsection-title">Lineární · směr</p>
+              <label><span id="layout-texture-linear-angle-2-label"></span> <input type="range" id="layout-texture-linear-angle-2" min="0" max="360" step="1" value="90" /></label>
+            </div>
+            <div id="layout-tex-grad-radial-wrap-2" class="layout-tex-subsection">
+              <p class="layout-tex-subsection-title">Radiální · světlost</p>
+              <p class="layout-footer-buttons">
+                <button type="button" id="layout-texture-radial-light-center-2">Světlý střed</button><span class="btn-sep">·</span>
+                <button type="button" id="layout-texture-radial-light-edge-2">Světlý okraj</button>
+              </p>
+            </div>
+          </details>
+        </div>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-poster-inputs">
+          <p class="layout-footer-buttons">
+            <button type="button" id="layout-texture-pattern-random">Textura — náhodně</button>
+          </p>
+          <details class="layout-texture-grad-details">
+            <summary>Textura — Vrstva 1 (překryje gradient)</summary>
+            <p class="layout-footer-buttons">
+              <label><input type="checkbox" id="layout-texture-pat-enable-1" /> Textura V1</label>
+            </p>
+            <p class="layout-footer-buttons">
+              <label><input type="radio" name="layout-tex-pat-kind-1" id="layout-texture-pat-stripes-1" value="stripes" checked /> Pruhy</label><span class="btn-sep">·</span>
+              <label><input type="radio" name="layout-tex-pat-kind-1" id="layout-texture-pat-bitmap-1" value="bitmap" /> Bitmapa</label>
+            </p>
+            <div id="layout-tex-pat-stripes-wrap-1" class="layout-tex-subsection">
+              <p class="layout-tex-subsection-title">Pruhy</p>
+              <label><span id="layout-texture-pat-angle-1-label"></span> <input type="range" id="layout-texture-pat-angle-1" min="0" max="360" step="1" value="45" /></label>
+              <label><span id="layout-texture-pat-period-1-label"></span> <input type="range" id="layout-texture-pat-period-1" min="4" max="56" step="1" value="14" /></label>
+              <label><span id="layout-texture-pat-ratio-1-label"></span> <input type="range" id="layout-texture-pat-ratio-1" min="10" max="90" step="1" value="45" /></label>
+            </div>
+            <div id="layout-tex-pat-bitmap-wrap-1" class="layout-tex-subsection" hidden>
+              <p class="layout-tex-subsection-title">Bitmapa</p>
+              <p class="layout-footer-buttons">
+                <input type="file" id="layout-texture-pat-bitmap-file-1" accept="image/*" />
+                <button type="button" id="layout-texture-pat-bitmap-clear-1">Odebrat obrázek</button>
+              </p>
+              <label><span id="layout-texture-pat-bitmap-scale-1-label"></span> <input type="range" id="layout-texture-pat-bitmap-scale-1" min="25" max="200" step="5" value="100" /></label>
+              <p class="layout-footer-buttons">
+                <label><input type="checkbox" id="layout-texture-pat-bitmap-per-shape-1" /> Každý tvar zvlášť (jako gradient)</label>
+              </p>
+            </div>
+          </details>
+          <details class="layout-texture-grad-details">
+            <summary>Textura — Vrstva 2 (překryje gradient)</summary>
+            <p class="layout-footer-buttons">
+              <label><input type="checkbox" id="layout-texture-pat-enable-2" /> Textura V2</label>
+            </p>
+            <p class="layout-footer-buttons">
+              <label><input type="radio" name="layout-tex-pat-kind-2" id="layout-texture-pat-stripes-2" value="stripes" checked /> Pruhy</label><span class="btn-sep">·</span>
+              <label><input type="radio" name="layout-tex-pat-kind-2" id="layout-texture-pat-bitmap-2" value="bitmap" /> Bitmapa</label>
+            </p>
+            <div id="layout-tex-pat-stripes-wrap-2" class="layout-tex-subsection">
+              <p class="layout-tex-subsection-title">Pruhy</p>
+              <label><span id="layout-texture-pat-angle-2-label"></span> <input type="range" id="layout-texture-pat-angle-2" min="0" max="360" step="1" value="330" /></label>
+              <label><span id="layout-texture-pat-period-2-label"></span> <input type="range" id="layout-texture-pat-period-2" min="4" max="56" step="1" value="18" /></label>
+              <label><span id="layout-texture-pat-ratio-2-label"></span> <input type="range" id="layout-texture-pat-ratio-2" min="10" max="90" step="1" value="50" /></label>
+            </div>
+            <div id="layout-tex-pat-bitmap-wrap-2" class="layout-tex-subsection" hidden>
+              <p class="layout-tex-subsection-title">Bitmapa</p>
+              <p class="layout-footer-buttons">
+                <input type="file" id="layout-texture-pat-bitmap-file-2" accept="image/*" />
+                <button type="button" id="layout-texture-pat-bitmap-clear-2">Odebrat obrázek</button>
+              </p>
+              <label><span id="layout-texture-pat-bitmap-scale-2-label"></span> <input type="range" id="layout-texture-pat-bitmap-scale-2" min="25" max="200" step="5" value="100" /></label>
+              <p class="layout-footer-buttons">
+                <label><input type="checkbox" id="layout-texture-pat-bitmap-per-shape-2" /> Každý tvar zvlášť (jako gradient)</label>
+              </p>
+            </div>
+          </details>
+        </div>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-palette layout-palette-topright layout-palette-panel">
+          <ul class="layout-palette-list">
+            <li class="layout-palette-line">
+              <span class="layout-palette-label">Vrstva 1</span>
+              <div class="layout-palette-swatch" id="layout-layer1-swatch"></div>
+            </li>
+            <li class="layout-palette-line">
+              <span class="layout-palette-label">Vrstva 2</span>
+              <div class="layout-palette-swatch" id="layout-layer2-swatch"></div>
+            </li>
+            <li class="layout-palette-line">
+              <span class="layout-palette-label">Paleta</span>
+              <div class="layout-palette-swatches" id="layout-palette-swatches"></div>
+            </li>
+            <li class="layout-palette-line layout-palette-line--buttons">
+              <button type="button" id="layout-btn-save-palette">Uložit paletu</button>
+              <button type="button" id="layout-btn-reset-palette">Obnovit</button>
+            </li>
+            <li class="layout-palette-line">
+              <span class="layout-palette-label">Pozadí plátna</span>
+              <div class="layout-palette-swatch" id="layout-canvas-bg-swatch"></div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+    <main class="layout-main-two">
+      <div id="layout-canvas"></div>
+      <div class="layout-poster-pane">
+        <div id="poster-canvas"></div>
+      </div>
+    </main>
+  </div>
 
   <ul class="export-popup">
     <li><button type="button" id="layout-btn-convert">Krok 1: Převést na tvary</button></li>
-    <li><button type="button" id="layout-btn-png" disabled>Exportovat PNG</button></li>
-    <li><span class="layout-export-krok2">Krok 2:</span> <button type="button" id="layout-btn-svg" disabled>Exportovat SVG</button></li>
+    <li><button type="button" id="layout-btn-png-logo" disabled>Krok 2: Exportovat PNG — Logo</button></li>
+    <li><button type="button" id="layout-btn-png-plakat" disabled>Krok 2: Exportovat PNG — Plakát</button></li>
+    <li><button type="button" id="layout-btn-svg-logo" disabled>Krok 2: Exportovat SVG — Logo</button></li>
+    <li><button type="button" id="layout-btn-svg-plakat" disabled>Krok 2: Exportovat SVG — Plakát</button></li>
   </ul>
-  <footer class="layout-footer">
-    <p class="layout-footer-buttons">
-      <button type="button" id="layout-btn-unify">Sjednotit</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-symmetrical">Symetrické</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-unify-cuts">Sjednotit rezy</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-layer1">Vrstva 1</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-layer2">Vrstva 2</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-cutout">Výřez</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-randomize">Náhodný styl</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-extreme">Náhodná extrémní</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-orientation-axes">Orientace tečka + čtverec</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-typeface">Změnit řez Vrstva 1+2</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-typeface-1">Změnit řez Vrstva 1</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-typeface-2">Změnit řez Vrstva 2</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-colors">Náhodné barvy</button><span class="btn-sep">·</span>
-      <button type="button" id="layout-btn-randomize-all">Náhodně vše</button>
-    </p>
-    <div class="layout-css-row">
-      <div class="layout-css-col">
-        <p id="layout-font-info-1"></p>
-        <pre id="layout-css-layer1"></pre>
-      </div>
-      <div class="layout-css-col">
-        <p id="layout-font-info-2"></p>
-        <pre id="layout-css-layer2"></pre>
-      </div>
-    </div>
-  </footer>
 
   <script type="module" src="/src/layout.js"></script>
 </body>
