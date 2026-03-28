@@ -66,7 +66,8 @@
           <button type="button" id="layout-btn-typeface-1">Změnit řez Vrstva 1</button><span class="btn-sep">·</span>
           <button type="button" id="layout-btn-typeface-2">Změnit řez Vrstva 2</button><span class="btn-sep">·</span>
           <button type="button" id="layout-btn-colors">Náhodné barvy</button><span class="btn-sep">·</span>
-          <button type="button" id="layout-btn-random-effects">Náhodné efekty</button>
+          <button type="button" id="layout-btn-random-effects">Náhodné efekty</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-clear-texture-effects">Bez efektu</button>
           <button type="button" id="layout-btn-randomize-all">Náhodně vše</button>
         </p>
         <div class="layout-sidebar-sep"></div>
@@ -140,10 +141,11 @@
             </p>
             <p class="layout-footer-buttons">
               <label><input type="radio" name="layout-tex-pat-kind-1" id="layout-texture-pat-stripes-1" value="stripes" checked /> Pruhy</label><span class="btn-sep">·</span>
-              <label><input type="radio" name="layout-tex-pat-kind-1" id="layout-texture-pat-bitmap-1" value="bitmap" /> Bitmapa</label>
+              <label><input type="radio" name="layout-tex-pat-kind-1" id="layout-texture-pat-bitmap-1" value="bitmap" /> Bitmapa</label><span class="btn-sep">·</span>
+              <label><input type="radio" name="layout-tex-pat-kind-1" id="layout-texture-pat-dothatch-1" value="dothatch" /> Tečky</label>
             </p>
             <div id="layout-tex-pat-stripes-wrap-1" class="layout-tex-subsection">
-              <p class="layout-tex-subsection-title">Pruhy</p>
+              <p class="layout-tex-subsection-title">Pruhy a tečky — parametry</p>
               <label><span id="layout-texture-pat-angle-1-label"></span> <input type="range" id="layout-texture-pat-angle-1" min="0" max="360" step="1" value="45" /></label>
               <label><span id="layout-texture-pat-period-1-label"></span> <input type="range" id="layout-texture-pat-period-1" min="4" max="56" step="1" value="14" /></label>
               <label><span id="layout-texture-pat-ratio-1-label"></span> <input type="range" id="layout-texture-pat-ratio-1" min="10" max="90" step="1" value="45" /></label>
@@ -167,10 +169,11 @@
             </p>
             <p class="layout-footer-buttons">
               <label><input type="radio" name="layout-tex-pat-kind-2" id="layout-texture-pat-stripes-2" value="stripes" checked /> Pruhy</label><span class="btn-sep">·</span>
-              <label><input type="radio" name="layout-tex-pat-kind-2" id="layout-texture-pat-bitmap-2" value="bitmap" /> Bitmapa</label>
+              <label><input type="radio" name="layout-tex-pat-kind-2" id="layout-texture-pat-bitmap-2" value="bitmap" /> Bitmapa</label><span class="btn-sep">·</span>
+              <label><input type="radio" name="layout-tex-pat-kind-2" id="layout-texture-pat-dothatch-2" value="dothatch" /> Tečky</label>
             </p>
             <div id="layout-tex-pat-stripes-wrap-2" class="layout-tex-subsection">
-              <p class="layout-tex-subsection-title">Pruhy</p>
+              <p class="layout-tex-subsection-title">Pruhy a tečky — parametry</p>
               <label><span id="layout-texture-pat-angle-2-label"></span> <input type="range" id="layout-texture-pat-angle-2" min="0" max="360" step="1" value="330" /></label>
               <label><span id="layout-texture-pat-period-2-label"></span> <input type="range" id="layout-texture-pat-period-2" min="4" max="56" step="1" value="18" /></label>
               <label><span id="layout-texture-pat-ratio-2-label"></span> <input type="range" id="layout-texture-pat-ratio-2" min="10" max="90" step="1" value="50" /></label>
@@ -186,6 +189,34 @@
                 <label><input type="checkbox" id="layout-texture-pat-bitmap-per-shape-2" /> Každý tvar zvlášť (jako gradient)</label>
               </p>
             </div>
+          </details>
+        </div>
+        <div class="layout-sidebar-sep"></div>
+        <div class="layout-poster-inputs">
+          <p class="layout-footer-buttons">
+            <button type="button" id="layout-path-outline-random">Obrys — náhodně</button>
+          </p>
+          <details class="layout-texture-grad-details">
+            <summary>Obrys — Vrstva 1</summary>
+            <p class="layout-footer-buttons">
+              <label><input type="checkbox" id="layout-path-outline-l1" /> Obrys V1</label>
+            </p>
+            <label><span id="layout-path-outline-width-1-label"></span> <input type="range" id="layout-path-outline-width-1" min="0" max="10" step="1" value="0" /></label>
+          </details>
+          <details class="layout-texture-grad-details">
+            <summary>Obrys — Vrstva 2</summary>
+            <p class="layout-footer-buttons">
+              <label><input type="checkbox" id="layout-path-outline-l2" /> Obrys V2</label>
+            </p>
+            <label><span id="layout-path-outline-width-2-label"></span> <input type="range" id="layout-path-outline-width-2" min="0" max="10" step="1" value="0" /></label>
+          </details>
+          <details class="layout-texture-grad-details">
+            <summary>Přerušení obrysu (jedna mezera na tvar)</summary>
+            <p class="layout-footer-buttons">
+              <label><input type="checkbox" id="layout-path-outline-random-gaps" /> Zapnout</label><span class="btn-sep">·</span>
+              <button type="button" id="layout-path-outline-reroll-gaps">Znovu promíchat</button>
+            </p>
+            <label><span id="layout-path-outline-gap-amount-label"></span> <input type="range" id="layout-path-outline-gap-amount" min="0" max="10" step="1" value="5" /></label>
           </details>
         </div>
         <div class="layout-sidebar-sep"></div>

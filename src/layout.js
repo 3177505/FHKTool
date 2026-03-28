@@ -346,6 +346,100 @@ function parseSvgFillToRgb(fill) {
   return [0, 0, 0];
 }
 
+function pathStrokeRgbFromShapeFill(path, layerRgb) {
+  const fill = (path.getAttribute('fill') || '').trim();
+  if (fill.includes('url(')) {
+    const of = path.getAttribute('data-tex-orig-fill');
+    if (of) {
+      const t = of.trim();
+      if (t && !t.includes('url(')) {
+        const rgb = parseSvgFillToRgb(t);
+        if (t.startsWith('#') || rgb[0] || rgb[1] || rgb[2]) return rgb;
+      }
+    }
+    return [layerRgb[0], layerRgb[1], layerRgb[2]];
+  }
+  const low = fill.toLowerCase();
+  if (!fill || low === 'none' || low === 'transparent') return [layerRgb[0], layerRgb[1], layerRgb[2]];
+  return parseSvgFillToRgb(fill);
+}
+
+const OUTLINE_STROKE_SCALE = 0.38;
+
+function pathOutlineWidthForLayer(state, layerNum) {
+  const legacy = Math.max(0, Number(state.pathOutlineWidth) || 0);
+  const w1 = Number(state.pathOutlineWidth1);
+  const w2 = Number(state.pathOutlineWidth2);
+  const v1 = Number.isFinite(w1) ? Math.max(0, w1) : legacy;
+  const v2 = Number.isFinite(w2) ? Math.max(0, w2) : legacy;
+  return layerNum === 1 ? v1 : v2;
+}
+
+function hashPathOutlineSeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32FromSeed(seedU32) {
+  let a = seedU32 >>> 0;
+  return () => {
+    a += 0x6d2b79f5;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function singleGapOutlineDash(path, layerNum, state, strokePx) {
+  const salt = Number(state.pathOutlineDashSalt) || 0;
+  const rawGap = Number(state.pathOutlineGapAmount);
+  const gapAmtN = Number.isFinite(rawGap) ? Math.max(0, Math.min(10, rawGap)) : 5;
+  const d = path.getAttribute('d') || '';
+  const seedU32 = hashPathOutlineSeed(`${salt}:${layerNum}:${strokePx.toFixed(3)}:${d.slice(0, 140)}`);
+  const rnd = mulberry32FromSeed(seedU32);
+  let len = 0;
+  try {
+    len = typeof path.getTotalLength === 'function' ? path.getTotalLength() : 0;
+  } catch {
+    len = 0;
+  }
+  const gapMinFrac = 0.04 + (gapAmtN / 10) * 0.16;
+  const gapMaxFrac = 0.09 + (gapAmtN / 10) * 0.28;
+  const gapFrac = gapMinFrac + rnd() * (gapMaxFrac - gapMinFrac);
+  if (!Number.isFinite(len) || len < 0.8) {
+    const gapLen = Math.max(2, strokePx * (2.8 + gapAmtN * 0.45));
+    const dashLen = Math.max(4, strokePx * 10);
+    const period = dashLen + gapLen;
+    return {
+      dasharray: `${dashLen} ${gapLen}`,
+      dashoffset: String(-rnd() * period)
+    };
+  }
+  let gapLen = len * gapFrac;
+  gapLen = Math.min(gapLen, len * 0.42);
+  gapLen = Math.max(gapLen, Math.min(len * 0.32, strokePx * (1.0 + gapAmtN * 0.12)));
+  gapLen = Math.min(gapLen, len * 0.95);
+  const drawLen = len - gapLen;
+  if (drawLen <= strokePx * 0.25) {
+    const g2 = Math.min(len * 0.38, len - strokePx * 0.5);
+    const d2 = len - g2;
+    return {
+      dasharray: `${d2} ${g2}`,
+      dashoffset: String(-rnd() * len)
+    };
+  }
+  const phase = rnd() * len;
+  return {
+    dasharray: `${drawLen} ${gapLen}`,
+    dashoffset: String(-phase)
+  };
+}
+
 function resetSvgTextureFill(svgEl) {
   const defs = svgEl.querySelector('defs');
   if (defs) defs.querySelectorAll('[data-texfill="1"]').forEach((n) => n.remove());
@@ -353,6 +447,168 @@ function resetSvgTextureFill(svgEl) {
     path.setAttribute('fill', path.getAttribute('data-tex-orig-fill') || '#000000');
     path.removeAttribute('data-tex-orig-fill');
   });
+}
+
+function resetSvgPathOutlines(svgEl) {
+  svgEl.querySelectorAll('path[data-tex-outline-clone="1"]').forEach((n) => n.remove());
+  svgEl.querySelectorAll('path[data-tex-outline-base="1"]').forEach((path) => {
+    const os = path.getAttribute('data-tex-orig-stroke');
+    if (os === '__none__') path.removeAttribute('stroke');
+    else if (os != null) path.setAttribute('stroke', os);
+    else path.removeAttribute('stroke');
+    const ow = path.getAttribute('data-tex-orig-stroke-width');
+    if (ow === '__none__') path.removeAttribute('stroke-width');
+    else if (ow != null) path.setAttribute('stroke-width', ow);
+    else path.removeAttribute('stroke-width');
+    const op = path.getAttribute('data-tex-orig-paint-order');
+    if (op === '__none__') path.removeAttribute('paint-order');
+    else if (op != null) path.setAttribute('paint-order', op);
+    else path.removeAttribute('paint-order');
+    const oj = path.getAttribute('data-tex-orig-stroke-linejoin');
+    if (oj === '__none__') path.removeAttribute('stroke-linejoin');
+    else if (oj != null) path.setAttribute('stroke-linejoin', oj);
+    else path.removeAttribute('stroke-linejoin');
+    const oc = path.getAttribute('data-tex-orig-stroke-linecap');
+    if (oc === '__none__') path.removeAttribute('stroke-linecap');
+    else if (oc != null) path.setAttribute('stroke-linecap', oc);
+    else path.removeAttribute('stroke-linecap');
+    const oda = path.getAttribute('data-tex-orig-stroke-dasharray');
+    if (oda === '__none__') path.removeAttribute('stroke-dasharray');
+    else if (oda != null) path.setAttribute('stroke-dasharray', oda);
+    else path.removeAttribute('stroke-dasharray');
+    const odo = path.getAttribute('data-tex-orig-stroke-dashoffset');
+    if (odo === '__none__') path.removeAttribute('stroke-dashoffset');
+    else if (odo != null) path.setAttribute('stroke-dashoffset', odo);
+    else path.removeAttribute('stroke-dashoffset');
+    path.removeAttribute('data-tex-outline-base');
+    path.removeAttribute('data-tex-orig-stroke');
+    path.removeAttribute('data-tex-orig-stroke-width');
+    path.removeAttribute('data-tex-orig-paint-order');
+    path.removeAttribute('data-tex-orig-stroke-linejoin');
+    path.removeAttribute('data-tex-orig-stroke-linecap');
+    path.removeAttribute('data-tex-orig-stroke-dasharray');
+    path.removeAttribute('data-tex-orig-stroke-dashoffset');
+    const sf = path.getAttribute('data-tex-outline-saved-fill');
+    if (sf != null) {
+      if (sf === '__missing__') path.removeAttribute('fill');
+      else if (sf === '__none__') path.setAttribute('fill', 'none');
+      else path.setAttribute('fill', sf);
+      path.removeAttribute('data-tex-outline-saved-fill');
+    }
+  });
+}
+
+function layoutStateHasPathOutlines(state) {
+  if (!state) return false;
+  const w1 = pathOutlineWidthForLayer(state, 1);
+  const w2 = pathOutlineWidthForLayer(state, 2);
+  const v1 = !!state.layer1Visible && !!state.pathOutlineLayer1 && w1 > 0;
+  const v2 = !!state.layer2Visible && !!state.pathOutlineLayer2 && w2 > 0;
+  return v1 || v2;
+}
+
+function applyPathOutlinesToPaths(paths, layerRgb, state, layerNum) {
+  const enabled = layerNum === 1 ? !!state.pathOutlineLayer1 : !!state.pathOutlineLayer2;
+  const w = pathOutlineWidthForLayer(state, layerNum);
+  if (!enabled || !w) return;
+  const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
+  if (!visL) return;
+  const randomGaps = !!state.pathOutlineRandomGaps;
+  paths.forEach((path) => {
+    if (path.getAttribute('data-tex-outline-clone') === '1') return;
+    const [sr, sg, sb] = pathStrokeRgbFromShapeFill(path, layerRgb);
+    const strokeCol = `rgb(${sr},${sg},${sb})`;
+    if (!path.hasAttribute('data-tex-outline-base')) {
+      path.setAttribute('data-tex-outline-base', '1');
+      if (path.hasAttribute('fill')) {
+        const v = path.getAttribute('fill');
+        path.setAttribute('data-tex-outline-saved-fill', v === '' ? '__none__' : v);
+      } else {
+        path.setAttribute('data-tex-outline-saved-fill', '__missing__');
+      }
+      path.setAttribute('data-tex-orig-stroke', path.hasAttribute('stroke') ? path.getAttribute('stroke') : '__none__');
+      path.setAttribute('data-tex-orig-stroke-width', path.hasAttribute('stroke-width') ? path.getAttribute('stroke-width') : '__none__');
+      path.setAttribute('data-tex-orig-paint-order', path.hasAttribute('paint-order') ? path.getAttribute('paint-order') : '__none__');
+      path.setAttribute('data-tex-orig-stroke-linejoin', path.hasAttribute('stroke-linejoin') ? path.getAttribute('stroke-linejoin') : '__none__');
+      path.setAttribute('data-tex-orig-stroke-linecap', path.hasAttribute('stroke-linecap') ? path.getAttribute('stroke-linecap') : '__none__');
+      path.setAttribute(
+        'data-tex-orig-stroke-dasharray',
+        path.hasAttribute('stroke-dasharray') ? path.getAttribute('stroke-dasharray') : '__none__'
+      );
+      path.setAttribute(
+        'data-tex-orig-stroke-dashoffset',
+        path.hasAttribute('stroke-dashoffset') ? path.getAttribute('stroke-dashoffset') : '__none__'
+      );
+    }
+    const strokePx = Math.max(0.18, w * OUTLINE_STROKE_SCALE);
+    path.setAttribute('stroke', strokeCol);
+    path.setAttribute('stroke-width', String(strokePx));
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('stroke-linecap', 'round');
+    path.removeAttribute('paint-order');
+    path.setAttribute('fill', 'none');
+    if (randomGaps) {
+      const { dasharray, dashoffset } = singleGapOutlineDash(path, layerNum, state, strokePx);
+      path.setAttribute('stroke-dasharray', dasharray);
+      path.setAttribute('stroke-dashoffset', dashoffset);
+    } else {
+      path.removeAttribute('stroke-dasharray');
+      path.removeAttribute('stroke-dashoffset');
+    }
+  });
+}
+
+function applyPathOutlinesToGroup(g, state, layerNum, layerRgb) {
+  if (!g) return;
+  const paths = g.querySelectorAll('path');
+  if (!paths.length) return;
+  applyPathOutlinesToPaths(paths, layerRgb, state, layerNum);
+}
+
+function applyPathOutlinesToLayerRoot(svgRoot, state, layerNum) {
+  if (!svgRoot) return;
+  const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
+  if (!visL) return;
+  const paths = svgRoot.querySelectorAll('path');
+  if (!paths.length) return;
+  const rgb = layerNum === 1 ? state.logo1Color : state.logo2Color;
+  applyPathOutlinesToPaths(paths, rgb, state, layerNum);
+}
+
+function syncLayerCssSpanOutline(layerEl, state, layerNum) {
+  if (!layerEl) return;
+  const spans = layerEl.querySelectorAll('span');
+  const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
+  const enabled = layerNum === 1 ? !!state.pathOutlineLayer1 : !!state.pathOutlineLayer2;
+  const w = pathOutlineWidthForLayer(state, layerNum);
+  const rgba = layerNum === 1 ? state.logo1Color : state.logo2Color;
+  const [r, g, b] = rgba;
+  const col = `rgb(${r},${g},${b})`;
+  if (!visL || !enabled || !w) {
+    spans.forEach((span) => {
+      span.style.removeProperty('-webkit-text-stroke-width');
+      span.style.removeProperty('-webkit-text-stroke-color');
+      span.style.removeProperty('paint-order');
+      span.style.removeProperty('text-shadow');
+    });
+    return;
+  }
+  const strokePx = Math.max(0.18, w * OUTLINE_STROKE_SCALE);
+  spans.forEach((span) => {
+    span.style.setProperty('color', 'transparent');
+    span.style.setProperty('-webkit-text-fill-color', 'transparent');
+    span.style.setProperty('-webkit-text-stroke-width', `${strokePx}px`);
+    span.style.setProperty('-webkit-text-stroke-color', col);
+    span.style.setProperty('paint-order', 'stroke fill');
+    span.style.removeProperty('text-shadow');
+  });
+}
+
+function texturePatternKindResolved(raw) {
+  const k = String(raw || 'stripes');
+  if (k === 'bitmap') return 'bitmap';
+  if (k === 'dothatch') return 'dothatch';
+  return 'stripes';
 }
 
 function textureFillOptsForLayer(state, layerNum) {
@@ -371,23 +627,24 @@ function textureFillOptsForLayer(state, layerNum) {
 }
 
 function createSvgTextureGradient(defs, gradId, gradOpts, c0, c1, innerStopPct) {
+  const doc = defs.ownerDocument || document;
   const linear = gradOpts.kind === 'linear';
   const angle = Number(gradOpts.angle) || 0;
   if (!linear) {
-    const rg = document.createElementNS(SVG_NS, 'radialGradient');
+    const rg = doc.createElementNS(SVG_NS, 'radialGradient');
     rg.setAttribute('id', gradId);
     rg.setAttribute('cx', '50%');
     rg.setAttribute('cy', '50%');
     rg.setAttribute('r', '100%');
     rg.setAttribute('gradientUnits', 'objectBoundingBox');
     rg.setAttribute('data-texfill', '1');
-    const s0 = document.createElementNS(SVG_NS, 'stop');
+    const s0 = doc.createElementNS(SVG_NS, 'stop');
     s0.setAttribute('offset', '0%');
     s0.setAttribute('stop-color', `rgb(${c0.r},${c0.g},${c0.b})`);
-    const s1 = document.createElementNS(SVG_NS, 'stop');
+    const s1 = doc.createElementNS(SVG_NS, 'stop');
     s1.setAttribute('offset', `${innerStopPct}%`);
     s1.setAttribute('stop-color', `rgb(${c1.r},${c1.g},${c1.b})`);
-    const s2 = document.createElementNS(SVG_NS, 'stop');
+    const s2 = doc.createElementNS(SVG_NS, 'stop');
     s2.setAttribute('offset', '100%');
     s2.setAttribute('stop-color', `rgb(${c1.r},${c1.g},${c1.b})`);
     rg.appendChild(s0);
@@ -396,7 +653,7 @@ function createSvgTextureGradient(defs, gradId, gradOpts, c0, c1, innerStopPct) 
     defs.appendChild(rg);
     return;
   }
-  const lg = document.createElementNS(SVG_NS, 'linearGradient');
+  const lg = doc.createElementNS(SVG_NS, 'linearGradient');
   lg.setAttribute('id', gradId);
   lg.setAttribute('x1', '0');
   lg.setAttribute('y1', '0');
@@ -405,10 +662,10 @@ function createSvgTextureGradient(defs, gradId, gradOpts, c0, c1, innerStopPct) 
   lg.setAttribute('gradientUnits', 'objectBoundingBox');
   lg.setAttribute('gradientTransform', `rotate(${angle} 0.5 0.5)`);
   lg.setAttribute('data-texfill', '1');
-  const t0 = document.createElementNS(SVG_NS, 'stop');
+  const t0 = doc.createElementNS(SVG_NS, 'stop');
   t0.setAttribute('offset', '0%');
   t0.setAttribute('stop-color', `rgb(${c0.r},${c0.g},${c0.b})`);
-  const t1 = document.createElementNS(SVG_NS, 'stop');
+  const t1 = doc.createElementNS(SVG_NS, 'stop');
   t1.setAttribute('offset', '100%');
   t1.setAttribute('stop-color', `rgb(${c1.r},${c1.g},${c1.b})`);
   lg.appendChild(t0);
@@ -420,7 +677,7 @@ function texturePatternOptsForLayer(state, layerNum) {
   if (layerNum === 1) {
     return {
       enabled: !!state.texturePatternEnabled1,
-      kind: state.texturePatternKind1 === 'bitmap' ? 'bitmap' : 'stripes',
+      kind: texturePatternKindResolved(state.texturePatternKind1),
       angle: Number(state.texturePatternStripesAngle1) || 0,
       period: Math.max(4, Number(state.texturePatternStripesPeriod1) || 14),
       ratio: (() => {
@@ -434,7 +691,7 @@ function texturePatternOptsForLayer(state, layerNum) {
   }
   return {
     enabled: !!state.texturePatternEnabled2,
-    kind: state.texturePatternKind2 === 'bitmap' ? 'bitmap' : 'stripes',
+    kind: texturePatternKindResolved(state.texturePatternKind2),
     angle: Number(state.texturePatternStripesAngle2) || 0,
     period: Math.max(4, Number(state.texturePatternStripesPeriod2) || 14),
     ratio: (() => {
@@ -447,27 +704,35 @@ function texturePatternOptsForLayer(state, layerNum) {
   };
 }
 
+function textureGradientActiveForLayer(state, layerNum) {
+  const on = layerNum === 1 ? !!state.textureFillLayer1 : !!state.textureFillLayer2;
+  const amt = Math.max(0, Number(layerNum === 1 ? state.textureRadialAmount1 : state.textureRadialAmount2) || 0);
+  return on && amt > 0;
+}
+
 function layerPatternShouldApply(state, layerNum) {
   const pat = texturePatternOptsForLayer(state, layerNum);
   if (!pat.enabled) return false;
   if (pat.kind === 'bitmap') return !!pat.bitmapUrl;
+  if (pat.kind === 'dothatch') return true;
   return true;
 }
 
 function applyStripePatternToSvgPaths(defs, paths, pat, r, g, b) {
+  const doc = defs.ownerDocument || document;
   const period = Math.max(4, Math.min(160, pat.period || 14));
   const ratio = Math.min(0.92, Math.max(0.08, Number(pat.ratio) || 0.45));
   const stripeW = Math.max(1, period * ratio);
   const angle = Number(pat.angle) || 0;
   const patId = `texpat-${++textureRadialIdSeq}`;
-  const p = document.createElementNS(SVG_NS, 'pattern');
+  const p = doc.createElementNS(SVG_NS, 'pattern');
   p.setAttribute('id', patId);
   p.setAttribute('patternUnits', 'userSpaceOnUse');
   p.setAttribute('width', String(period));
   p.setAttribute('height', String(period));
   p.setAttribute('patternTransform', `rotate(${angle} ${period / 2} ${period / 2})`);
   p.setAttribute('data-texfill', '1');
-  const rect = document.createElementNS(SVG_NS, 'rect');
+  const rect = doc.createElementNS(SVG_NS, 'rect');
   rect.setAttribute('x', '0');
   rect.setAttribute('y', String(-period));
   rect.setAttribute('width', String(stripeW));
@@ -483,7 +748,115 @@ function applyStripePatternToSvgPaths(defs, paths, pat, r, g, b) {
   });
 }
 
+function applyDotsPatternToSvgPaths(defs, paths, pat, r, g, b) {
+  const doc = defs.ownerDocument || document;
+  const period = Math.max(4, Math.min(160, pat.period || 14));
+  const ratio = Math.min(0.92, Math.max(0.08, Number(pat.ratio) || 0.45));
+  const angle = Number(pat.angle) || 0;
+  const fillCol = `rgb(${r},${g},${b})`;
+  const n = Math.min(22, Math.max(2, Math.round(96 / period)));
+  const step = 1 / n;
+  const dotR = Math.min(step * 0.48, step * ratio * 0.55);
+  paths.forEach((path) => {
+    const rawFill = path.getAttribute('fill') || '#000000';
+    if (rawFill.includes('url(')) return;
+    path.setAttribute('data-tex-orig-fill', rawFill);
+    const patId = `texpat-${++textureRadialIdSeq}`;
+    const p = doc.createElementNS(SVG_NS, 'pattern');
+    p.setAttribute('id', patId);
+    p.setAttribute('patternUnits', 'objectBoundingBox');
+    p.setAttribute('patternContentUnits', 'objectBoundingBox');
+    p.setAttribute('width', '1');
+    p.setAttribute('height', '1');
+    if (angle) p.setAttribute('patternTransform', `rotate(${angle} 0.5 0.5)`);
+    p.setAttribute('data-texfill', '1');
+    for (let iy = 0; iy < n; iy += 1) {
+      for (let ix = 0; ix < n; ix += 1) {
+        const cx = step * (ix + 0.5);
+        const cy = step * (iy + 0.5);
+        const circle = doc.createElementNS(SVG_NS, 'circle');
+        circle.setAttribute('cx', String(cx));
+        circle.setAttribute('cy', String(cy));
+        circle.setAttribute('r', String(Math.max(0.004, dotR)));
+        circle.setAttribute('fill', fillCol);
+        p.appendChild(circle);
+      }
+    }
+    defs.appendChild(p);
+    path.setAttribute('fill', `url(#${patId})`);
+  });
+}
+
+function applyGradientWithWaveDotsToSvgPaths(defs, paths, fillOpts, amount, pat, pr, pg, pb, layerNum) {
+  const doc = defs.ownerDocument || document;
+  const amt = Math.max(0, Number(amount) || 0);
+  const innerStop = textureFillInnerStopPct(amt);
+  const period = Math.max(4, Math.min(160, pat.period || 14));
+  const ratio = Math.min(0.92, Math.max(0.08, Number(pat.ratio) || 0.45));
+  const angle = Number(pat.angle) || 0;
+  const n = Math.min(26, Math.max(4, Math.round(128 / period)));
+  const fillCol = `rgb(${pr},${pg},${pb})`;
+  const step = 1 / n;
+  const maxDist = Math.hypot(n, n) / 2;
+
+  paths.forEach((path) => {
+    const rawFill = path.getAttribute('fill') || '#000000';
+    if (rawFill.includes('url(')) return;
+    path.setAttribute('data-tex-orig-fill', rawFill);
+    const [r, g, b] = parseSvgFillToRgb(rawFill);
+    const st = textureFillEdgeAndLit(amt, r, g, b, !!fillOpts.invert);
+    const c0 = { r: st.c0r, g: st.c0g, b: st.c0b };
+    const c1 = { r: st.c1r, g: st.c1g, b: st.c1b };
+    const gradId = `texgrad-${++textureRadialIdSeq}`;
+    const gradOpts = { kind: fillOpts.kind, angle: fillOpts.angle };
+    createSvgTextureGradient(defs, gradId, gradOpts, c0, c1, innerStop);
+
+    const d = path.getAttribute('d') || '';
+    const seedU32 = hashPathOutlineSeed(`wvd:${layerNum}:${amt}:${d.slice(0, 200)}`);
+    const rnd = mulberry32FromSeed(seedU32);
+    const centerXi = Math.floor(rnd() * n);
+    const centerYi = Math.floor(rnd() * n);
+    const minR = step * (0.06 + ratio * 0.06);
+    const maxR = step * (0.22 + ratio * 0.28);
+
+    const patId = `texpat-${++textureRadialIdSeq}`;
+    const p = doc.createElementNS(SVG_NS, 'pattern');
+    p.setAttribute('id', patId);
+    p.setAttribute('patternUnits', 'objectBoundingBox');
+    p.setAttribute('patternContentUnits', 'objectBoundingBox');
+    p.setAttribute('width', '1');
+    p.setAttribute('height', '1');
+    if (angle) p.setAttribute('patternTransform', `rotate(${angle} 0.5 0.5)`);
+    p.setAttribute('data-texfill', '1');
+    const bg = doc.createElementNS(SVG_NS, 'rect');
+    bg.setAttribute('x', '0');
+    bg.setAttribute('y', '0');
+    bg.setAttribute('width', '1');
+    bg.setAttribute('height', '1');
+    bg.setAttribute('fill', `url(#${gradId})`);
+    p.appendChild(bg);
+    for (let iy = 0; iy < n; iy += 1) {
+      for (let ix = 0; ix < n; ix += 1) {
+        const dist = Math.hypot(ix - centerXi, iy - centerYi);
+        const df = Math.max(0, Math.min(1, 1 - dist / maxDist));
+        const rad = Math.max(minR, minR + (maxR - minR) * df * (0.8 + rnd() * 0.4));
+        const cx = step * (ix + 0.5);
+        const cy = step * (iy + 0.5);
+        const circle = doc.createElementNS(SVG_NS, 'circle');
+        circle.setAttribute('cx', String(cx));
+        circle.setAttribute('cy', String(cy));
+        circle.setAttribute('r', String(Math.max(0.0025, rad)));
+        circle.setAttribute('fill', fillCol);
+        p.appendChild(circle);
+      }
+    }
+    defs.appendChild(p);
+    path.setAttribute('fill', `url(#${patId})`);
+  });
+}
+
 function applyBitmapPatternToSvgPaths(defs, paths, pat) {
+  const doc = defs.ownerDocument || document;
   const sc = Math.max(0.25, Math.min(4, (Number(pat.bitmapScale) || 100) / 100));
   const w = Math.round(96 * sc);
   const h = Math.round(96 * sc);
@@ -495,14 +868,14 @@ function applyBitmapPatternToSvgPaths(defs, paths, pat) {
       if (rawFill.includes('url(')) return;
       path.setAttribute('data-tex-orig-fill', rawFill);
       const patId = `texpat-${++textureRadialIdSeq}`;
-      const p = document.createElementNS(SVG_NS, 'pattern');
+      const p = doc.createElementNS(SVG_NS, 'pattern');
       p.setAttribute('id', patId);
       p.setAttribute('patternUnits', 'objectBoundingBox');
       p.setAttribute('patternContentUnits', 'objectBoundingBox');
       p.setAttribute('width', '1');
       p.setAttribute('height', '1');
       p.setAttribute('data-texfill', '1');
-      const img = document.createElementNS(SVG_NS, 'image');
+      const img = doc.createElementNS(SVG_NS, 'image');
       img.setAttribute('href', pat.bitmapUrl);
       img.setAttribute('x', String(io));
       img.setAttribute('y', String(io));
@@ -516,13 +889,13 @@ function applyBitmapPatternToSvgPaths(defs, paths, pat) {
     return;
   }
   const patId = `texpat-${++textureRadialIdSeq}`;
-  const p = document.createElementNS(SVG_NS, 'pattern');
+  const p = doc.createElementNS(SVG_NS, 'pattern');
   p.setAttribute('id', patId);
   p.setAttribute('patternUnits', 'userSpaceOnUse');
   p.setAttribute('width', String(w));
   p.setAttribute('height', String(h));
   p.setAttribute('data-texfill', '1');
-  const img = document.createElementNS(SVG_NS, 'image');
+  const img = doc.createElementNS(SVG_NS, 'image');
   img.setAttribute('href', pat.bitmapUrl);
   img.setAttribute('width', String(w));
   img.setAttribute('height', String(h));
@@ -555,57 +928,32 @@ function applyTextureFillToSvgPaths(defs, paths, fillOpts, amount) {
   });
 }
 
-function syncTextureFillSvgDoc(svgEl, state) {
-  resetSvgTextureFill(svgEl);
-  let defs = svgEl.querySelector('defs');
-  if (!defs) {
-    defs = document.createElementNS(SVG_NS, 'defs');
-    svgEl.insertBefore(defs, svgEl.firstChild);
-  }
-  const g1 = svgEl.querySelector('#layer1');
-  const g2 = svgEl.querySelector('#layer2');
-  const proc = (g, layerNum) => {
-    if (!g) return;
-    const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
-    if (!visL) return;
-    const paths = g.querySelectorAll('path');
-    if (!paths.length) return;
-    const [pr, pg, pb] = layerNum === 1 ? state.logo1Color : state.logo2Color;
-    if (layerPatternShouldApply(state, layerNum)) {
-      const pat = texturePatternOptsForLayer(state, layerNum);
-      if (pat.kind === 'stripes') {
-        applyStripePatternToSvgPaths(defs, paths, pat, pr, pg, pb);
-      } else {
-        applyBitmapPatternToSvgPaths(defs, paths, pat);
-      }
-      return;
-    }
-    const activeGrad = layerNum === 1 ? !!state.textureFillLayer1 : !!state.textureFillLayer2;
-    const amt = Math.max(0, Number(layerNum === 1 ? state.textureRadialAmount1 : state.textureRadialAmount2) || 0);
-    if (activeGrad && amt > 0) {
-      applyTextureFillToSvgPaths(defs, paths, textureFillOptsForLayer(state, layerNum), amt);
-    }
-  };
-  proc(g1, 1);
-  proc(g2, 2);
-}
-
-function syncTextureFillLayerSvgRoot(svgRoot, state, layerNum) {
-  resetSvgTextureFill(svgRoot);
+function applySyncTextureToPathList(defs, paths, layerNum, state) {
+  if (!paths || paths.length === 0) return;
   const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
   if (!visL) return;
-  const paths = svgRoot.querySelectorAll('path');
-  if (!paths.length) return;
-  let defs = svgRoot.querySelector('defs');
-  if (!defs) {
-    defs = document.createElementNS(SVG_NS, 'defs');
-    svgRoot.insertBefore(defs, svgRoot.firstChild);
-  }
   const [pr, pg, pb] = layerNum === 1 ? state.logo1Color : state.logo2Color;
   if (layerPatternShouldApply(state, layerNum)) {
     const pat = texturePatternOptsForLayer(state, layerNum);
+    const amt = Math.max(0, Number(layerNum === 1 ? state.textureRadialAmount1 : state.textureRadialAmount2) || 0);
+    if (pat.kind === 'dothatch' && textureGradientActiveForLayer(state, layerNum)) {
+      applyGradientWithWaveDotsToSvgPaths(
+        defs,
+        paths,
+        textureFillOptsForLayer(state, layerNum),
+        amt,
+        pat,
+        pr,
+        pg,
+        pb,
+        layerNum
+      );
+      return;
+    }
     if (pat.kind === 'stripes') {
       applyStripePatternToSvgPaths(defs, paths, pat, pr, pg, pb);
+    } else if (pat.kind === 'dothatch') {
+      applyDotsPatternToSvgPaths(defs, paths, pat, pr, pg, pb);
     } else {
       applyBitmapPatternToSvgPaths(defs, paths, pat);
     }
@@ -616,6 +964,81 @@ function syncTextureFillLayerSvgRoot(svgRoot, state, layerNum) {
   if (activeGrad && amt > 0) {
     applyTextureFillToSvgPaths(defs, paths, textureFillOptsForLayer(state, layerNum), amt);
   }
+}
+
+function syncTextureFillSvgDoc(svgEl, state) {
+  resetSvgTextureFill(svgEl);
+  resetSvgPathOutlines(svgEl);
+  const doc = svgEl.ownerDocument || document;
+  let defs = svgEl.querySelector('defs');
+  if (!defs) {
+    defs = doc.createElementNS(SVG_NS, 'defs');
+    svgEl.insertBefore(defs, svgEl.firstChild);
+  }
+  const g1 = svgEl.querySelector('#layer1');
+  const g2 = svgEl.querySelector('#layer2');
+  if (g1) applySyncTextureToPathList(defs, g1.querySelectorAll('path'), 1, state);
+  if (g2) applySyncTextureToPathList(defs, g2.querySelectorAll('path'), 2, state);
+  svgEl.querySelectorAll('g[data-layout-pair-cutout="1"]').forEach((cg) => {
+    applySyncTextureToPathList(defs, cg.querySelectorAll('path[data-tex-layer="1"]'), 1, state);
+    applySyncTextureToPathList(defs, cg.querySelectorAll('path[data-tex-layer="2"]'), 2, state);
+  });
+  if (g1) applyPathOutlinesToGroup(g1, state, 1, state.logo1Color);
+  if (g2) applyPathOutlinesToGroup(g2, state, 2, state.logo2Color);
+  svgEl.querySelectorAll('g[data-layout-pair-cutout="1"]').forEach((cg) => {
+    applyPathOutlinesToPaths(cg.querySelectorAll('path[data-tex-layer="1"]'), state.logo1Color, state, 1);
+    applyPathOutlinesToPaths(cg.querySelectorAll('path[data-tex-layer="2"]'), state.logo2Color, state, 2);
+  });
+}
+
+function syncTextureFillLayerSvgRoot(svgRoot, state, layerNum) {
+  resetSvgTextureFill(svgRoot);
+  resetSvgPathOutlines(svgRoot);
+  const visL = layerNum === 1 ? state.layer1Visible : state.layer2Visible;
+  if (!visL) return;
+  const paths = svgRoot.querySelectorAll('path');
+  if (!paths.length) return;
+  const doc = svgRoot.ownerDocument || document;
+  let defs = svgRoot.querySelector('defs');
+  if (!defs) {
+    defs = doc.createElementNS(SVG_NS, 'defs');
+    svgRoot.insertBefore(defs, svgRoot.firstChild);
+  }
+  const [pr, pg, pb] = layerNum === 1 ? state.logo1Color : state.logo2Color;
+  if (layerPatternShouldApply(state, layerNum)) {
+    const pat = texturePatternOptsForLayer(state, layerNum);
+    const amt = Math.max(0, Number(layerNum === 1 ? state.textureRadialAmount1 : state.textureRadialAmount2) || 0);
+    if (pat.kind === 'dothatch' && textureGradientActiveForLayer(state, layerNum)) {
+      applyGradientWithWaveDotsToSvgPaths(
+        defs,
+        paths,
+        textureFillOptsForLayer(state, layerNum),
+        amt,
+        pat,
+        pr,
+        pg,
+        pb,
+        layerNum
+      );
+      applyPathOutlinesToLayerRoot(svgRoot, state, layerNum);
+      return;
+    }
+    if (pat.kind === 'stripes') {
+      applyStripePatternToSvgPaths(defs, paths, pat, pr, pg, pb);
+    } else if (pat.kind === 'dothatch') {
+      applyDotsPatternToSvgPaths(defs, paths, pat, pr, pg, pb);
+    } else {
+      applyBitmapPatternToSvgPaths(defs, paths, pat);
+    }
+    applyPathOutlinesToLayerRoot(svgRoot, state, layerNum);
+    return;
+  }
+  const activeGrad = layerNum === 1 ? !!state.textureFillLayer1 : !!state.textureFillLayer2;
+  const amt = Math.max(0, Number(layerNum === 1 ? state.textureRadialAmount1 : state.textureRadialAmount2) || 0);
+  if (activeGrad && amt > 0) {
+    applyTextureFillToSvgPaths(defs, paths, textureFillOptsForLayer(state, layerNum), amt);
+  }
+  applyPathOutlinesToLayerRoot(svgRoot, state, layerNum);
 }
 
 function setLayerCssTextureGradientOnly(layerEl, rgba, amount, active, fillOpts) {
@@ -633,6 +1056,7 @@ function setLayerCssTextureGradientOnly(layerEl, rgba, amount, active, fillOpts)
       span.style.removeProperty('background-clip');
       span.style.removeProperty('-webkit-background-clip');
       span.style.removeProperty('-webkit-text-fill-color');
+      span.style.removeProperty('transform');
     });
     return;
   }
@@ -652,6 +1076,7 @@ function setLayerCssTextureGradientOnly(layerEl, rgba, amount, active, fillOpts)
     span.style.removeProperty('background-position');
     span.style.setProperty('background-clip', 'text');
     span.style.setProperty('-webkit-background-clip', 'text');
+    span.style.removeProperty('transform');
   });
 }
 
@@ -673,6 +1098,7 @@ function syncLayerCssSpanFill(layerEl, state, layerNum) {
       span.style.removeProperty('background-clip');
       span.style.removeProperty('-webkit-background-clip');
       span.style.removeProperty('-webkit-text-fill-color');
+      span.style.removeProperty('transform');
     });
   };
 
@@ -694,6 +1120,28 @@ function syncLayerCssSpanFill(layerEl, state, layerNum) {
         span.style.backgroundPosition = 'center';
         span.style.setProperty('background-clip', 'text');
         span.style.setProperty('-webkit-background-clip', 'text');
+        span.style.removeProperty('transform');
+      });
+      return;
+    }
+    if (pat.kind === 'dothatch') {
+      const period = Math.max(4, Math.min(160, pat.period || 14));
+      const ratio = Math.min(0.92, Math.max(0.08, Number(pat.ratio) || 0.45));
+      const ang = Number(pat.angle) || 0;
+      const c = `rgb(${r},${g},${b})`;
+      const dotStop = Math.round(ratio * 42);
+      const bg = `radial-gradient(circle closest-side, ${c} ${dotStop}%, transparent ${Math.min(99, dotStop + 3)}%)`;
+      spans.forEach((span) => {
+        span.style.color = 'transparent';
+        span.style.setProperty('-webkit-text-fill-color', 'transparent');
+        span.style.backgroundImage = bg;
+        span.style.backgroundSize = `${period}px ${period}px`;
+        span.style.backgroundRepeat = 'repeat';
+        span.style.backgroundPosition = 'center';
+        span.style.setProperty('background-clip', 'text');
+        span.style.setProperty('-webkit-background-clip', 'text');
+        if (ang) span.style.transform = `rotate(${ang}deg)`;
+        else span.style.removeProperty('transform');
       });
       return;
     }
@@ -712,6 +1160,7 @@ function syncLayerCssSpanFill(layerEl, state, layerNum) {
       span.style.backgroundPosition = 'center';
       span.style.setProperty('background-clip', 'text');
       span.style.setProperty('-webkit-background-clip', 'text');
+      span.style.removeProperty('transform');
     });
     return;
   }
@@ -743,6 +1192,8 @@ function syncTextureRadial(state) {
       } else {
         syncLayerCssSpanFill(lw.querySelector('.layout-layer1'), state, 1);
         syncLayerCssSpanFill(lw.querySelector('.layout-layer2'), state, 2);
+        syncLayerCssSpanOutline(lw.querySelector('.layout-layer1'), state, 1);
+        syncLayerCssSpanOutline(lw.querySelector('.layout-layer2'), state, 2);
       }
     }
   }
@@ -762,9 +1213,105 @@ function syncTextureRadial(state) {
       } else {
         syncLayerCssSpanFill(pw.querySelector('.poster-layer1'), state, 1);
         syncLayerCssSpanFill(pw.querySelector('.poster-layer2'), state, 2);
+        syncLayerCssSpanOutline(pw.querySelector('.poster-layer1'), state, 1);
+        syncLayerCssSpanOutline(pw.querySelector('.poster-layer2'), state, 2);
       }
     }
   }
+}
+
+function applySvgExportBlur(svgRoot, state) {
+  const px = Math.max(0, Number(state.textureBlurPx) || 0);
+  if (px < 0.01) return;
+  const blurLayer1 = state.layer1Visible && !!state.textureBlurLayer1;
+  const blurLayer2 = state.layer2Visible && !!state.textureBlurLayer2;
+  if (!blurLayer1 && !blurLayer2) return;
+  const doc = svgRoot.ownerDocument || document;
+  let defs = svgRoot.querySelector('defs');
+  if (!defs) {
+    defs = doc.createElementNS(SVG_NS, 'defs');
+    svgRoot.insertBefore(defs, svgRoot.firstChild);
+  }
+  const std = Math.max(0.25, px * 0.52);
+  const mk = (id) => {
+    const f = doc.createElementNS(SVG_NS, 'filter');
+    f.setAttribute('id', id);
+    f.setAttribute('filterUnits', 'userSpaceOnUse');
+    f.setAttribute('x', '-60%');
+    f.setAttribute('y', '-60%');
+    f.setAttribute('width', '220%');
+    f.setAttribute('height', '220%');
+    f.setAttribute('data-texfill', '1');
+    const blur = doc.createElementNS(SVG_NS, 'feGaussianBlur');
+    blur.setAttribute('in', 'SourceGraphic');
+    blur.setAttribute('stdDeviation', String(std));
+    f.appendChild(blur);
+    defs.appendChild(f);
+  };
+  if (blurLayer1) mk('export-blur-layer1');
+  if (blurLayer2) mk('export-blur-layer2');
+  const g1 = svgRoot.querySelector('#layer1');
+  const g2 = svgRoot.querySelector('#layer2');
+  if (blurLayer1 && g1) g1.setAttribute('filter', 'url(#export-blur-layer1)');
+  if (blurLayer2 && g2) g2.setAttribute('filter', 'url(#export-blur-layer2)');
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+async function resolveImageUrlForSvgExport(url) {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  if (u.startsWith('data:')) return u;
+  try {
+    const res = await fetch(u);
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    return await blobToDataUrl(blob);
+  } catch (e) {
+    console.warn('[SVG export] Nepodařilo se vložit obrázek:', e);
+    return u;
+  }
+}
+
+async function stateWithBitmapDataUrlsForExport(state) {
+  if (!state) return state;
+  let u1 = state.texturePatternBitmapUrl1;
+  let u2 = state.texturePatternBitmapUrl2;
+  const need1 =
+    layerPatternShouldApply(state, 1) &&
+    texturePatternOptsForLayer(state, 1).kind === 'bitmap' &&
+    u1 &&
+    !String(u1).startsWith('data:');
+  const need2 =
+    layerPatternShouldApply(state, 2) &&
+    texturePatternOptsForLayer(state, 2).kind === 'bitmap' &&
+    u2 &&
+    !String(u2).startsWith('data:');
+  if (need1) u1 = await resolveImageUrlForSvgExport(u1);
+  if (need2) u2 = await resolveImageUrlForSvgExport(u2);
+  if (need1 || need2) return { ...state, texturePatternBitmapUrl1: u1, texturePatternBitmapUrl2: u2 };
+  return state;
+}
+
+async function finalizeSvgForExport(svgStr, state) {
+  if (!svgStr || !state) return svgStr;
+  const exportState = await stateWithBitmapDataUrlsForExport(state);
+  const parser = new DOMParser();
+  const pdoc = parser.parseFromString(svgStr, 'image/svg+xml');
+  const root = pdoc.documentElement;
+  if (!root || root.localName !== 'svg') return svgStr;
+  if (!root.querySelector('#layer1') && !root.querySelector('g[data-layout-pair-cutout="1"]')) return svgStr;
+  syncTextureFillSvgDoc(root, exportState);
+  applySvgExportBlur(root, exportState);
+  const serialized = new XMLSerializer().serializeToString(root);
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${serialized}`;
 }
 
 function textureGradientSliderBounds() {
@@ -844,22 +1391,31 @@ function rollTexturePatternLayer(state, ln) {
   const ratio = (12 + Math.floor(Math.random() * 58)) / 100;
   const angle = Math.floor(Math.random() * 24) * 15;
   const scale = 40 + Math.floor(Math.random() * 15) * 10;
+  const url1 = state.texturePatternBitmapUrl1;
+  const url2 = state.texturePatternBitmapUrl2;
+  const pickKind = (url) => {
+    const r = Math.random();
+    if (r < 0.34) return 'stripes';
+    if (r < 0.58) {
+      if (url) return 'bitmap';
+      return Math.random() < 0.5 ? 'stripes' : 'dothatch';
+    }
+    if (r < 0.78) return 'dothatch';
+    if (url) return 'bitmap';
+    return Math.random() < 0.5 ? 'stripes' : 'dothatch';
+  };
   if (ln === 1) {
     state.texturePatternStripesPeriod1 = period;
     state.texturePatternStripesRatio1 = ratio;
     state.texturePatternStripesAngle1 = angle;
     state.texturePatternBitmapScale1 = Math.min(200, Math.max(25, scale));
-    let k = Math.random() < 0.62 ? 'stripes' : 'bitmap';
-    if (k === 'bitmap' && !state.texturePatternBitmapUrl1) k = 'stripes';
-    state.texturePatternKind1 = k;
+    state.texturePatternKind1 = pickKind(url1);
   } else {
     state.texturePatternStripesPeriod2 = period;
     state.texturePatternStripesRatio2 = ratio;
     state.texturePatternStripesAngle2 = angle;
     state.texturePatternBitmapScale2 = Math.min(200, Math.max(25, scale));
-    let k = Math.random() < 0.62 ? 'stripes' : 'bitmap';
-    if (k === 'bitmap' && !state.texturePatternBitmapUrl2) k = 'stripes';
-    state.texturePatternKind2 = k;
+    state.texturePatternKind2 = pickKind(url2);
   }
 }
 
@@ -892,10 +1448,120 @@ function applyRandomTexturePattern(state) {
   syncTextureRadial(state);
 }
 
+function applyRandomPathOutline(state) {
+  const v1 = !!state.layer1Visible;
+  const v2 = !!state.layer2Visible;
+  if (!v1 && !v2) return;
+  state.pathOutlineWidth1 = 1 + Math.floor(Math.random() * 5);
+  state.pathOutlineWidth2 = 1 + Math.floor(Math.random() * 5);
+  state.pathOutlineWidth = 0;
+  if (Math.random() < 0.35) state.pathOutlineRandomGaps = true;
+  if (Math.random() < 0.5) state.pathOutlineDashSalt = (Number(state.pathOutlineDashSalt) || 0) + 1 + Math.floor(Math.random() * 8);
+  if (v1 && v2) {
+    const t = Math.random();
+    if (t < 1 / 3) {
+      state.pathOutlineLayer1 = true;
+      state.pathOutlineLayer2 = false;
+    } else if (t < 2 / 3) {
+      state.pathOutlineLayer1 = false;
+      state.pathOutlineLayer2 = true;
+    } else {
+      state.pathOutlineLayer1 = true;
+      state.pathOutlineLayer2 = true;
+    }
+  } else {
+    state.pathOutlineLayer1 = v1;
+    state.pathOutlineLayer2 = v2;
+  }
+  syncPathOutlineControlsFromState(state);
+  syncTextureRadial(state);
+}
+
 function applyRandomTextureEffectsCombo(state) {
   applyRandomTextureBlur(state);
   applyRandomTextureGradient(state);
   applyRandomTexturePattern(state);
+  if (Math.random() < 0.45) applyRandomPathOutline(state);
+}
+
+function resetNahodneTextureEfekty(state) {
+  revokeTexturePatternBitmap(state, 1);
+  revokeTexturePatternBitmap(state, 2);
+  state.textureBlurPx = 0;
+  state.textureBlurLayer1 = true;
+  state.textureBlurLayer2 = true;
+  state.textureRadialAmount1 = 0;
+  state.textureRadialAmount2 = 0;
+  state.textureFillLayer1 = true;
+  state.textureFillLayer2 = true;
+  state.textureGradientKind1 = 'radial';
+  state.textureGradientKind2 = 'radial';
+  state.textureGradientInvert1 = false;
+  state.textureGradientInvert2 = false;
+  state.textureGradientAngle1 = 90;
+  state.textureGradientAngle2 = 90;
+  state.texturePatternEnabled1 = false;
+  state.texturePatternEnabled2 = false;
+  state.texturePatternKind1 = 'stripes';
+  state.texturePatternKind2 = 'stripes';
+  state.texturePatternStripesAngle1 = 45;
+  state.texturePatternStripesAngle2 = 330;
+  state.texturePatternStripesPeriod1 = 14;
+  state.texturePatternStripesPeriod2 = 18;
+  state.texturePatternStripesRatio1 = 0.45;
+  state.texturePatternStripesRatio2 = 0.5;
+  state.texturePatternBitmapUrl1 = '';
+  state.texturePatternBitmapUrl2 = '';
+  state.texturePatternBitmapScale1 = 100;
+  state.texturePatternBitmapScale2 = 100;
+  state.texturePatternBitmapPerShape1 = false;
+  state.texturePatternBitmapPerShape2 = false;
+  state.pathOutlineLayer1 = false;
+  state.pathOutlineLayer2 = false;
+  state.pathOutlineWidth = 0;
+  state.pathOutlineWidth1 = 0;
+  state.pathOutlineWidth2 = 0;
+  state.pathOutlineRandomGaps = false;
+  state.pathOutlineGapAmount = 5;
+  state.pathOutlineDashSalt = 0;
+  const blurRangeEl = document.getElementById('layout-texture-blur-amount');
+  if (blurRangeEl) blurRangeEl.value = String(state.textureBlurPx);
+  const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
+  if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx} px`;
+  const blurL1 = document.getElementById('layout-texture-blur-l1');
+  const blurL2 = document.getElementById('layout-texture-blur-l2');
+  if (blurL1) blurL1.checked = !!state.textureBlurLayer1;
+  if (blurL2) blurL2.checked = !!state.textureBlurLayer2;
+  syncTextureGradientControlsFromState(state);
+  syncTexturePatternControlsFromState(state);
+  syncPathOutlineControlsFromState(state);
+  syncTextureBlur(state);
+  syncTextureRadial(state);
+}
+
+function syncPathOutlineControlsFromState(state) {
+  const w1 = pathOutlineWidthForLayer(state, 1);
+  const w2 = pathOutlineWidthForLayer(state, 2);
+  const wEl1 = document.getElementById('layout-path-outline-width-1');
+  const wLb1 = document.getElementById('layout-path-outline-width-1-label');
+  if (wEl1) wEl1.value = String(w1);
+  if (wLb1) wLb1.textContent = `Šířka obrysu V1: ${w1} px`;
+  const wEl2 = document.getElementById('layout-path-outline-width-2');
+  const wLb2 = document.getElementById('layout-path-outline-width-2-label');
+  if (wEl2) wEl2.value = String(w2);
+  if (wLb2) wLb2.textContent = `Šířka obrysu V2: ${w2} px`;
+  const gapEl = document.getElementById('layout-path-outline-gap-amount');
+  const gapLb = document.getElementById('layout-path-outline-gap-amount-label');
+  const gapAmt = Math.max(0, Math.min(10, Number(state.pathOutlineGapAmount)));
+  const gapV = Number.isFinite(gapAmt) ? gapAmt : 5;
+  if (gapEl) gapEl.value = String(gapV);
+  if (gapLb) gapLb.textContent = `Přerušení (mezery): ${gapV}`;
+  const rg = document.getElementById('layout-path-outline-random-gaps');
+  if (rg) rg.checked = !!state.pathOutlineRandomGaps;
+  const l1 = document.getElementById('layout-path-outline-l1');
+  const l2 = document.getElementById('layout-path-outline-l2');
+  if (l1) l1.checked = !!state.pathOutlineLayer1;
+  if (l2) l2.checked = !!state.pathOutlineLayer2;
 }
 
 function syncTextureGradientControlsFromState(state) {
@@ -948,12 +1614,14 @@ function syncTextureSubpanelVisibility(state) {
   if (gradLin2) gradLin2.hidden = !lin2;
   if (gradRad2) gradRad2.hidden = lin2;
 
-  const bm1 = state.texturePatternKind1 === 'bitmap';
+  const k1 = texturePatternKindResolved(state.texturePatternKind1);
+  const k2 = texturePatternKindResolved(state.texturePatternKind2);
+  const bm1 = k1 === 'bitmap';
   const sw1 = document.getElementById('layout-tex-pat-stripes-wrap-1');
   const bw1 = document.getElementById('layout-tex-pat-bitmap-wrap-1');
   if (sw1) sw1.hidden = bm1;
   if (bw1) bw1.hidden = !bm1;
-  const bm2 = state.texturePatternKind2 === 'bitmap';
+  const bm2 = k2 === 'bitmap';
   const sw2 = document.getElementById('layout-tex-pat-stripes-wrap-2');
   const bw2 = document.getElementById('layout-tex-pat-bitmap-wrap-2');
   if (sw2) sw2.hidden = bm2;
@@ -971,56 +1639,64 @@ function revokeTexturePatternBitmap(state, layerNum) {
   state[uKey] = '';
 }
 
+function refreshTexturePatParamLabelsFromState(state) {
+  for (const ln of [1, 2]) {
+    const k = texturePatternKindResolved(ln === 1 ? state.texturePatternKind1 : state.texturePatternKind2);
+    const isDots = k === 'dothatch';
+    const ang = ln === 1 ? state.texturePatternStripesAngle1 : state.texturePatternStripesAngle2;
+    const per = ln === 1 ? state.texturePatternStripesPeriod1 : state.texturePatternStripesPeriod2;
+    const pct = Math.round((Number(ln === 1 ? state.texturePatternStripesRatio1 : state.texturePatternStripesRatio2) || 0.45) * 100);
+    const aEl = document.getElementById(`layout-texture-pat-angle-${ln}-label`);
+    const pEl = document.getElementById(`layout-texture-pat-period-${ln}-label`);
+    const rEl = document.getElementById(`layout-texture-pat-ratio-${ln}-label`);
+    if (aEl) aEl.textContent = isDots ? `Úhel: ${ang ?? 0}°` : `Úhel pruhů: ${ang ?? 0}°`;
+    if (pEl) pEl.textContent = isDots ? `Hustota: ${per ?? 14}` : `Rozteč: ${per ?? 14}px`;
+    if (rEl) rEl.textContent = isDots ? `Velikost teček: ${pct}%` : `Šířka pruhu: ${pct}%`;
+  }
+}
+
 function syncTexturePatternControlsFromState(state) {
   const pe1 = document.getElementById('layout-texture-pat-enable-1');
   const pe2 = document.getElementById('layout-texture-pat-enable-2');
   if (pe1) pe1.checked = !!state.texturePatternEnabled1;
   if (pe2) pe2.checked = !!state.texturePatternEnabled2;
+  const k1 = texturePatternKindResolved(state.texturePatternKind1);
   const s1 = document.getElementById('layout-texture-pat-stripes-1');
   const b1 = document.getElementById('layout-texture-pat-bitmap-1');
-  if (s1 && b1) {
-    const bm = state.texturePatternKind1 === 'bitmap';
-    s1.checked = !bm;
-    b1.checked = bm;
+  const d1 = document.getElementById('layout-texture-pat-dothatch-1');
+  if (s1 && b1 && d1) {
+    s1.checked = k1 === 'stripes';
+    b1.checked = k1 === 'bitmap';
+    d1.checked = k1 === 'dothatch';
   }
+  const k2 = texturePatternKindResolved(state.texturePatternKind2);
   const s2 = document.getElementById('layout-texture-pat-stripes-2');
   const b2 = document.getElementById('layout-texture-pat-bitmap-2');
-  if (s2 && b2) {
-    const bm2 = state.texturePatternKind2 === 'bitmap';
-    s2.checked = !bm2;
-    b2.checked = bm2;
+  const d2 = document.getElementById('layout-texture-pat-dothatch-2');
+  if (s2 && b2 && d2) {
+    s2.checked = k2 === 'stripes';
+    b2.checked = k2 === 'bitmap';
+    d2.checked = k2 === 'dothatch';
   }
   const a1 = document.getElementById('layout-texture-pat-angle-1');
-  const a1l = document.getElementById('layout-texture-pat-angle-1-label');
   if (a1) a1.value = String(state.texturePatternStripesAngle1 ?? 0);
-  if (a1l) a1l.textContent = `Úhel pruhů: ${state.texturePatternStripesAngle1 ?? 0}°`;
   const p1 = document.getElementById('layout-texture-pat-period-1');
-  const p1l = document.getElementById('layout-texture-pat-period-1-label');
   if (p1) p1.value = String(state.texturePatternStripesPeriod1 ?? 14);
-  if (p1l) p1l.textContent = `Rozteč: ${state.texturePatternStripesPeriod1 ?? 14}px`;
   const r1 = document.getElementById('layout-texture-pat-ratio-1');
-  const r1l = document.getElementById('layout-texture-pat-ratio-1-label');
   const pct1 = Math.round((Number(state.texturePatternStripesRatio1) || 0.45) * 100);
   if (r1) r1.value = String(pct1);
-  if (r1l) r1l.textContent = `Šířka pruhu: ${pct1}%`;
   const sc1 = document.getElementById('layout-texture-pat-bitmap-scale-1');
   const sc1l = document.getElementById('layout-texture-pat-bitmap-scale-1-label');
   if (sc1) sc1.value = String(state.texturePatternBitmapScale1 ?? 100);
   if (sc1l) sc1l.textContent = `Dlaždice: ${state.texturePatternBitmapScale1 ?? 100}%`;
 
   const a2 = document.getElementById('layout-texture-pat-angle-2');
-  const a2l = document.getElementById('layout-texture-pat-angle-2-label');
   if (a2) a2.value = String(state.texturePatternStripesAngle2 ?? 0);
-  if (a2l) a2l.textContent = `Úhel pruhů: ${state.texturePatternStripesAngle2 ?? 0}°`;
   const p2 = document.getElementById('layout-texture-pat-period-2');
-  const p2l = document.getElementById('layout-texture-pat-period-2-label');
   if (p2) p2.value = String(state.texturePatternStripesPeriod2 ?? 14);
-  if (p2l) p2l.textContent = `Rozteč: ${state.texturePatternStripesPeriod2 ?? 14}px`;
   const r2 = document.getElementById('layout-texture-pat-ratio-2');
-  const r2l = document.getElementById('layout-texture-pat-ratio-2-label');
   const pct2 = Math.round((Number(state.texturePatternStripesRatio2) || 0.45) * 100);
   if (r2) r2.value = String(pct2);
-  if (r2l) r2l.textContent = `Šířka pruhu: ${pct2}%`;
   const sc2 = document.getElementById('layout-texture-pat-bitmap-scale-2');
   const sc2l = document.getElementById('layout-texture-pat-bitmap-scale-2-label');
   if (sc2) sc2.value = String(state.texturePatternBitmapScale2 ?? 100);
@@ -1029,6 +1705,7 @@ function syncTexturePatternControlsFromState(state) {
   if (bps1) bps1.checked = !!state.texturePatternBitmapPerShape1;
   const bps2 = document.getElementById('layout-texture-pat-bitmap-per-shape-2');
   if (bps2) bps2.checked = !!state.texturePatternBitmapPerShape2;
+  refreshTexturePatParamLabelsFromState(state);
   syncTextureSubpanelVisibility(state);
 }
 
@@ -2470,22 +3147,25 @@ function canvasToBlob(canvas) {
   return new Promise((resolve) => canvas.toBlob(resolve));
 }
 
-async function saveLayoutPng(shapes, canvasBg) {
+async function saveLayoutPng(shapes, canvasBg, state) {
   if (!shapes) return;
   const bg = normalizedCanvasBgHex(canvasBg);
   const ts = layoutTimestamp();
-  const layoutSvgForFile = shapes.layoutSvgExport || shapes.layoutSvg;
+  let layoutSvgForFile = shapes.layoutSvgExport || shapes.layoutSvg;
+  layoutSvgForFile = await finalizeSvgForExport(layoutSvgForFile, state);
   const layoutW = shapes.layoutExportW ?? CANVAS_W;
   const layoutH = shapes.layoutExportH ?? CANVAS_H;
   const layoutBlob = await svgToPngBlob(layoutSvgForFile, layoutW, layoutH, bg);
   if (layoutBlob) downloadBlob(layoutBlob, `layout_${ts}.png`);
 }
 
-async function savePosterPng(shapes, canvasBg) {
+async function savePosterPng(shapes, canvasBg, state) {
   if (!shapes) return;
   const bg = normalizedCanvasBgHex(canvasBg);
   const ts = layoutTimestamp();
-  const posterBlob = await svgToPngBlob(shapes.posterSvg, POSTER_W, POSTER_H, bg);
+  let posterSvg = shapes.posterSvg;
+  posterSvg = await finalizeSvgForExport(posterSvg, state);
+  const posterBlob = await svgToPngBlob(posterSvg, POSTER_W, POSTER_H, bg);
   if (posterBlob) downloadBlob(posterBlob, `poster_${ts}.png`);
 }
 
@@ -2678,9 +3358,7 @@ function collectSubcontourScalePool(state, stageIndices1, stageIndices2, font1, 
 }
 
 function applyRandomSubcontourOmissions(state, picks) {
-  clearShapePairCutoutState(state);
   clearShapeOmitState(state);
-  clearShapeScaleState(state);
   for (const p of picks) {
     if (p.poster) {
       if (p.layer === 1) state.shapeOmitPosterSub1.add(p.si);
@@ -2699,8 +3377,6 @@ function applyRandomSubcontourOmissions(state, picks) {
 
 function applyPairCutoutAllCells(state) {
   clearShapePairCutoutState(state);
-  clearShapeOmitState(state);
-  clearShapeScaleState(state);
   const n = state.numPoints || 0;
   for (let i = 0; i < n; i++) {
     state.shapePairCutoutCells.add(i);
@@ -2711,9 +3387,6 @@ function applyPairCutoutAllCells(state) {
 }
 
 function applyRandomSubcontourScales(state, scaledPicks) {
-  clearShapePairCutoutState(state);
-  clearShapeScaleState(state);
-  clearShapeOmitState(state);
   for (const p of scaledPicks) {
     if (p.poster) {
       const m = p.layer === 1 ? state.shapeScalePosterSub1 : state.shapeScalePosterSub2;
@@ -2853,7 +3526,7 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
       glyph1.contours.forEach((sub, si) => {
         if (subOmit1 && subOmit1.has(si)) return;
         const tr = `${trBase}${subcontourLocalScaleSuffix(sub, glyph1.pivotX, py1, state.shapeScaleSubcontours1, i, si)}`;
-        const line = `  <path data-idx="${i}" data-sub="${si}" d="${escapeXmlAttr(sub.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
+        const line = `  <path data-idx="${i}" data-sub="${si}" data-tex-layer="1" d="${escapeXmlAttr(sub.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
         if (useCellSplit) cellL1[i] += line;
         else layer1Paths += line;
       });
@@ -2865,7 +3538,7 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
       glyph2.contours.forEach((sub, si) => {
         if (subOmit2 && subOmit2.has(si)) return;
         const tr = `${trBase}${subcontourLocalScaleSuffix(sub, glyph2.pivotX, py2, state.shapeScaleSubcontours2, i, si)}`;
-        const line = `  <path data-idx="${i}" data-sub="${si}" d="${escapeXmlAttr(sub.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
+        const line = `  <path data-idx="${i}" data-sub="${si}" data-tex-layer="2" d="${escapeXmlAttr(sub.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
         if (useCellSplit) cellL2[i] += line;
         else layer2Paths += line;
       });
@@ -3001,7 +3674,7 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
     glyph1.contours.forEach((sub, si) => {
       if (state.shapeOmitPosterSub1 && state.shapeOmitPosterSub1.has(si)) return;
       const tr = `${trBase}${posterSubcontourLocalScaleSuffix(sub, glyph1.pivotX, glyph1.pivotYCenter, state.shapeScalePosterSub1, si)}`;
-      layer1Paths += `  <path data-sub="${si}" d="${escapeXmlAttr(sub.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
+      layer1Paths += `  <path data-sub="${si}" data-tex-layer="1" d="${escapeXmlAttr(sub.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
     });
   }
   if (layer2Visible && glyph2) {
@@ -3010,7 +3683,7 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
     glyph2.contours.forEach((sub, si) => {
       if (state.shapeOmitPosterSub2 && state.shapeOmitPosterSub2.has(si)) return;
       const tr = `${trBase}${posterSubcontourLocalScaleSuffix(sub, glyph2.pivotX, glyph2.pivotYCenter, state.shapeScalePosterSub2, si)}`;
-      layer2Paths += `  <path data-sub="${si}" d="${escapeXmlAttr(sub.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
+      layer2Paths += `  <path data-sub="${si}" data-tex-layer="2" d="${escapeXmlAttr(sub.pathData)}" fill="${c2}" transform="${tr}"/>\n`;
     });
   }
 
@@ -3218,17 +3891,20 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
   }
 }
 
-function saveLayoutSvg(shapes) {
+async function saveLayoutSvg(shapes, state) {
   if (!shapes) return;
   const ts = layoutTimestamp();
-  const layoutSvgForFile = shapes.layoutSvgExport || shapes.layoutSvg;
+  let layoutSvgForFile = shapes.layoutSvgExport || shapes.layoutSvg;
+  layoutSvgForFile = await finalizeSvgForExport(layoutSvgForFile, state);
   downloadBlob(new Blob([layoutSvgForFile], { type: 'image/svg+xml' }), `layout_${ts}.svg`);
 }
 
-function savePosterSvg(shapes) {
+async function savePosterSvg(shapes, state) {
   if (!shapes) return;
   const ts = layoutTimestamp();
-  downloadBlob(new Blob([shapes.posterSvg], { type: 'image/svg+xml' }), `poster_${ts}.svg`);
+  let posterSvg = shapes.posterSvg;
+  posterSvg = await finalizeSvgForExport(posterSvg, state);
+  downloadBlob(new Blob([posterSvg], { type: 'image/svg+xml' }), `poster_${ts}.svg`);
 }
 
 export function initLayout(containerId) {
@@ -3384,7 +4060,15 @@ export function initLayout(containerId) {
         texturePatternBitmapScale1: 100,
         texturePatternBitmapScale2: 100,
         texturePatternBitmapPerShape1: false,
-        texturePatternBitmapPerShape2: false
+        texturePatternBitmapPerShape2: false,
+        pathOutlineLayer1: false,
+        pathOutlineLayer2: false,
+        pathOutlineWidth: 0,
+        pathOutlineWidth1: 0,
+        pathOutlineWidth2: 0,
+        pathOutlineRandomGaps: false,
+        pathOutlineGapAmount: 5,
+        pathOutlineDashSalt: 0
       };
 
       const getPosterInputs = () => ({
@@ -3468,6 +4152,7 @@ export function initLayout(containerId) {
         if (blurL2) blurL2.checked = !!state.textureBlurLayer2;
         syncTextureGradientControlsFromState(state);
         syncTexturePatternControlsFromState(state);
+        syncPathOutlineControlsFromState(state);
         syncTextureBlur(state);
         syncTextureRadial(state);
       };
@@ -3709,15 +4394,19 @@ export function initLayout(containerId) {
         }
       });
 
-      document.getElementById('layout-btn-png-logo')?.addEventListener('click', () => saveLayoutPng(convertedShapes, state.canvasBg));
-      document.getElementById('layout-btn-png-plakat')?.addEventListener('click', () => savePosterPng(convertedShapes, state.canvasBg));
+      document.getElementById('layout-btn-png-logo')?.addEventListener('click', () => {
+        saveLayoutPng(convertedShapes, state.canvasBg, state).catch((e) => console.error('PNG layout failed:', e));
+      });
+      document.getElementById('layout-btn-png-plakat')?.addEventListener('click', () => {
+        savePosterPng(convertedShapes, state.canvasBg, state).catch((e) => console.error('PNG poster failed:', e));
+      });
       document.getElementById('layout-btn-svg-logo')?.addEventListener('click', () => {
         if (!convertedShapes || !krok1ConfirmedForSvg) return;
-        saveLayoutSvg(convertedShapes);
+        saveLayoutSvg(convertedShapes, state).catch((e) => console.error('SVG layout failed:', e));
       });
       document.getElementById('layout-btn-svg-plakat')?.addEventListener('click', () => {
         if (!convertedShapes || !krok1ConfirmedForSvg) return;
-        savePosterSvg(convertedShapes);
+        savePosterSvg(convertedShapes, state).catch((e) => console.error('SVG poster failed:', e));
       });
       document.getElementById('layout-btn-unify')?.addEventListener('click', () => updateMode('unify'));
       document.getElementById('layout-btn-symmetrical')?.addEventListener('click', () => updateMode('symmetrical'));
@@ -3872,7 +4561,6 @@ export function initLayout(containerId) {
         if (btn) btn.disabled = true;
         try {
           clearShapeOmitState(state);
-          clearShapeScaleState(state);
           clearShapePairCutoutState(state);
           syncLayoutGeometry(state);
           const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
@@ -3890,7 +4578,7 @@ export function initLayout(containerId) {
             });
           }
         } catch (e) {
-          console.error('Obnovit tvary failed:', e);
+          console.error('Obnovit všechny tvary failed:', e);
         } finally {
           syncExportButtons();
           if (btn) btn.disabled = false;
@@ -4181,6 +4869,10 @@ export function initLayout(containerId) {
         applyRandomTextureEffectsCombo(state);
       });
 
+      document.getElementById('layout-btn-clear-texture-effects')?.addEventListener('click', () => {
+        resetNahodneTextureEfekty(state);
+      });
+
       const resizeHandler = () => {
         requestAnimationFrame(() => {
           scaleLayoutToFit(container);
@@ -4318,40 +5010,35 @@ export function initLayout(containerId) {
         syncTextureRadial(state);
       });
 
-      const bindPatKind = (stripId, bitId, kindKey) => {
-        document.getElementById(stripId)?.addEventListener('change', (e) => {
-          if (!e.target.checked) return;
-          state[kindKey] = 'stripes';
-          syncTextureSubpanelVisibility(state);
-          syncTextureRadial(state);
-        });
-        document.getElementById(bitId)?.addEventListener('change', (e) => {
-          if (!e.target.checked) return;
-          state[kindKey] = 'bitmap';
-          syncTextureSubpanelVisibility(state);
-          syncTextureRadial(state);
+      const bindPatKindGroup = (name, kindKey) => {
+        document.querySelectorAll(`input[name="${name}"]`).forEach((el) => {
+          el.addEventListener('change', (e) => {
+            if (!e.target.checked) return;
+            const v = e.target.value;
+            state[kindKey] = v === 'bitmap' ? 'bitmap' : v === 'dothatch' ? 'dothatch' : 'stripes';
+            syncTextureSubpanelVisibility(state);
+            refreshTexturePatParamLabelsFromState(state);
+            syncTextureRadial(state);
+          });
         });
       };
-      bindPatKind('layout-texture-pat-stripes-1', 'layout-texture-pat-bitmap-1', 'texturePatternKind1');
-      bindPatKind('layout-texture-pat-stripes-2', 'layout-texture-pat-bitmap-2', 'texturePatternKind2');
+      bindPatKindGroup('layout-tex-pat-kind-1', 'texturePatternKind1');
+      bindPatKindGroup('layout-tex-pat-kind-2', 'texturePatternKind2');
 
       document.getElementById('layout-texture-pat-angle-1')?.addEventListener('input', (e) => {
         state.texturePatternStripesAngle1 = Number(e.target.value) || 0;
-        const el = document.getElementById('layout-texture-pat-angle-1-label');
-        if (el) el.textContent = `Úhel pruhů: ${state.texturePatternStripesAngle1}°`;
+        refreshTexturePatParamLabelsFromState(state);
         syncTextureRadial(state);
       });
       document.getElementById('layout-texture-pat-period-1')?.addEventListener('input', (e) => {
         state.texturePatternStripesPeriod1 = Math.max(4, Number(e.target.value) || 14);
-        const el = document.getElementById('layout-texture-pat-period-1-label');
-        if (el) el.textContent = `Rozteč: ${state.texturePatternStripesPeriod1}px`;
+        refreshTexturePatParamLabelsFromState(state);
         syncTextureRadial(state);
       });
       document.getElementById('layout-texture-pat-ratio-1')?.addEventListener('input', (e) => {
         const pct = Math.max(10, Math.min(90, Number(e.target.value) || 45));
         state.texturePatternStripesRatio1 = pct / 100;
-        const el = document.getElementById('layout-texture-pat-ratio-1-label');
-        if (el) el.textContent = `Šířka pruhu: ${pct}%`;
+        refreshTexturePatParamLabelsFromState(state);
         syncTextureRadial(state);
       });
       document.getElementById('layout-texture-pat-bitmap-scale-1')?.addEventListener('input', (e) => {
@@ -4363,21 +5050,18 @@ export function initLayout(containerId) {
 
       document.getElementById('layout-texture-pat-angle-2')?.addEventListener('input', (e) => {
         state.texturePatternStripesAngle2 = Number(e.target.value) || 0;
-        const el = document.getElementById('layout-texture-pat-angle-2-label');
-        if (el) el.textContent = `Úhel pruhů: ${state.texturePatternStripesAngle2}°`;
+        refreshTexturePatParamLabelsFromState(state);
         syncTextureRadial(state);
       });
       document.getElementById('layout-texture-pat-period-2')?.addEventListener('input', (e) => {
         state.texturePatternStripesPeriod2 = Math.max(4, Number(e.target.value) || 14);
-        const el = document.getElementById('layout-texture-pat-period-2-label');
-        if (el) el.textContent = `Rozteč: ${state.texturePatternStripesPeriod2}px`;
+        refreshTexturePatParamLabelsFromState(state);
         syncTextureRadial(state);
       });
       document.getElementById('layout-texture-pat-ratio-2')?.addEventListener('input', (e) => {
         const pct = Math.max(10, Math.min(90, Number(e.target.value) || 45));
         state.texturePatternStripesRatio2 = pct / 100;
-        const el = document.getElementById('layout-texture-pat-ratio-2-label');
-        if (el) el.textContent = `Šířka pruhu: ${pct}%`;
+        refreshTexturePatParamLabelsFromState(state);
         syncTextureRadial(state);
       });
       document.getElementById('layout-texture-pat-bitmap-scale-2')?.addEventListener('input', (e) => {
@@ -4422,6 +5106,47 @@ export function initLayout(containerId) {
 
       document.getElementById('layout-texture-pattern-random')?.addEventListener('click', () => {
         applyRandomTexturePattern(state);
+      });
+
+      document.getElementById('layout-path-outline-random')?.addEventListener('click', () => {
+        applyRandomPathOutline(state);
+      });
+
+      document.getElementById('layout-path-outline-width-1')?.addEventListener('input', (e) => {
+        state.pathOutlineWidth1 = Math.max(0, Math.min(10, Number(e.target.value) || 0));
+        state.pathOutlineWidth = 0;
+        const el = document.getElementById('layout-path-outline-width-1-label');
+        if (el) el.textContent = `Šířka obrysu V1: ${state.pathOutlineWidth1} px`;
+        syncTextureRadial(state);
+      });
+      document.getElementById('layout-path-outline-width-2')?.addEventListener('input', (e) => {
+        state.pathOutlineWidth2 = Math.max(0, Math.min(10, Number(e.target.value) || 0));
+        state.pathOutlineWidth = 0;
+        const el = document.getElementById('layout-path-outline-width-2-label');
+        if (el) el.textContent = `Šířka obrysu V2: ${state.pathOutlineWidth2} px`;
+        syncTextureRadial(state);
+      });
+      document.getElementById('layout-path-outline-gap-amount')?.addEventListener('input', (e) => {
+        state.pathOutlineGapAmount = Math.max(0, Math.min(10, Number(e.target.value) || 0));
+        const el = document.getElementById('layout-path-outline-gap-amount-label');
+        if (el) el.textContent = `Přerušení (mezery): ${state.pathOutlineGapAmount}`;
+        syncTextureRadial(state);
+      });
+      document.getElementById('layout-path-outline-random-gaps')?.addEventListener('change', (e) => {
+        state.pathOutlineRandomGaps = !!e.target.checked;
+        syncTextureRadial(state);
+      });
+      document.getElementById('layout-path-outline-reroll-gaps')?.addEventListener('click', () => {
+        state.pathOutlineDashSalt = (Number(state.pathOutlineDashSalt) || 0) + 1;
+        syncTextureRadial(state);
+      });
+      document.getElementById('layout-path-outline-l1')?.addEventListener('change', (e) => {
+        state.pathOutlineLayer1 = !!e.target.checked;
+        syncTextureRadial(state);
+      });
+      document.getElementById('layout-path-outline-l2')?.addEventListener('change', (e) => {
+        state.pathOutlineLayer2 = !!e.target.checked;
+        syncTextureRadial(state);
       });
     })
     .catch((err) => {

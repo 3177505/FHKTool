@@ -1926,9 +1926,7 @@ function collectFilhSubcontourScalePool(state, stageIndices1, stageIndices2, fon
 }
 
 function applyRandomSubcontourOmissions(state, picks) {
-  clearShapePairCutoutState(state);
   clearShapeOmitState(state);
-  clearShapeScaleState(state);
   for (const p of picks) {
     if (p.poster) {
       if (p.layer === 1) state.shapeOmitPosterSub1.add(p.si);
@@ -1947,8 +1945,6 @@ function applyRandomSubcontourOmissions(state, picks) {
 
 function applyPairCutoutAllCells(state) {
   clearShapePairCutoutState(state);
-  clearShapeOmitState(state);
-  clearShapeScaleState(state);
   const n = state.numPoints || 0;
   for (let i = 0; i < n; i++) {
     state.shapePairCutoutCells.add(i);
@@ -1959,9 +1955,6 @@ function applyPairCutoutAllCells(state) {
 }
 
 function applyRandomSubcontourScales(state, scaledPicks) {
-  clearShapePairCutoutState(state);
-  clearShapeScaleState(state);
-  clearShapeOmitState(state);
   for (const p of scaledPicks) {
     if (p.filhTag) {
       state.shapeScalePosterFilh.set(`${p.filhTag}:${p.si}`, p.scale);
@@ -3129,7 +3122,6 @@ export function initLayout(containerId) {
         if (btn) btn.disabled = true;
         try {
           clearShapeOmitState(state);
-          clearShapeScaleState(state);
           clearShapePairCutoutState(state);
           syncLayoutGeometry(state);
           const shapes = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);

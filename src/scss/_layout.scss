@@ -236,6 +236,21 @@ body.layout-page .layout-footer-buttons {
   .btn-sep {
     display: none;
   }
+
+  label:has(input[type='radio']) {
+    cursor: pointer;
+    font: inherit;
+    color: $color-page-text;
+    text-decoration: underline;
+
+    &:hover {
+      text-decoration: none;
+    }
+
+    input[type='radio'] {
+      margin-right: $spacing-xs;
+    }
+  }
 }
 
 .layout-css-row {
