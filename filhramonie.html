@@ -19,6 +19,7 @@
             <li><a href="filhramonie.html" aria-current="page">FilHRAmonie</a></li>
             <li><a href="testing.html">Testování</a></li>
             <li><a href="forum.html">Forum</a></li>
+            <li><a href="sound-waves.html">Zvukové vlny</a></li>
           </ul>
         </nav>
         <div class="layout-sidebar-fill"></div>
@@ -54,8 +55,14 @@
           </div>
         </div>
         <div class="layout-sidebar-sep"></div>
+        <div class="layout-layer-preview-toggles">
+          <label><input type="checkbox" id="layout-layer-visible-1" checked /> Vrstva 1</label>
+          <label><input type="checkbox" id="layout-layer-visible-2" checked /> Vrstva 2</label>
+        </div>
+        <div class="layout-sidebar-sep"></div>
         <div class="layout-poster-inputs">
-          <label><input type="text" id="poster-letter" value="F" maxlength="1" /> Písmeno (plakát)</label>
+          <label><input type="text" id="poster-letter" value="F" maxlength="1" /> Písmeno</label>
+          <label><input type="text" id="poster-number" value="1" maxlength="1" /> Číslo</label>
           <label><select id="poster-feature">
             <option value="normal" selected>Bertin (základní)</option>
             <option value="ss01">ss01</option>
@@ -70,12 +77,10 @@
           <button type="button" id="layout-btn-unify">Sjednotit</button><span class="btn-sep">·</span>
           <button type="button" id="layout-btn-symmetrical">Symetrické</button><span class="btn-sep">·</span>
           <button type="button" id="layout-btn-unify-cuts">Sjednotit rezy</button><span class="btn-sep">·</span>
-          <button type="button" id="layout-btn-layer1">Vrstva 1</button><span class="btn-sep">·</span>
-          <button type="button" id="layout-btn-layer2">Vrstva 2</button><span class="btn-sep">·</span>
-          <button type="button" id="layout-btn-random-omit-shapes">Náhodně vynechat tvary</button><br />
-          <button type="button" id="layout-btn-random-pair-cutout">Výřez překryvů (všechny)</button><br />
-          <button type="button" id="layout-btn-restore-all-shapes">Obnovit všechny tvary</button><br />
-          <button type="button" id="layout-btn-random-scale-shapes">Náhodně měnit měřítko tvarů</button><br />
+          <button type="button" id="layout-btn-random-pair-cutout">Výřez překryvů</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-random-omit-shapes">Náhodně vynechat tvary</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-restore-all-shapes">Obnovit všechny tvary</button><span class="btn-sep">·</span>
+          <button type="button" id="layout-btn-random-scale-shapes">Náhodně měnit měřítko tvarů</button><span class="btn-sep">·</span>
           <button type="button" id="layout-btn-restore-scale-shapes">Obnovit měřítko tvarů</button><span class="btn-sep">·</span>
           <button type="button" id="layout-btn-randomize">Náhodný styl</button><span class="btn-sep">·</span>
           <button type="button" id="layout-btn-extreme">Náhodná extrémní</button><span class="btn-sep">·</span>
@@ -90,14 +95,6 @@
         <div class="layout-sidebar-sep"></div>
         <div class="layout-palette layout-palette-topright layout-palette-panel">
           <ul class="layout-palette-list">
-            <li class="layout-palette-line">
-              <span class="layout-palette-label">Vrstva 1</span>
-              <div class="layout-palette-swatch" id="layout-layer1-swatch"></div>
-            </li>
-            <li class="layout-palette-line">
-              <span class="layout-palette-label">Vrstva 2</span>
-              <div class="layout-palette-swatch" id="layout-layer2-swatch"></div>
-            </li>
             <li class="layout-palette-line">
               <span class="layout-palette-label">Paleta</span>
               <div class="layout-palette-swatches" id="layout-palette-swatches"></div>

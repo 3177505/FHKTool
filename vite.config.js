@@ -11,6 +11,7 @@ export default defineConfig({
         filhramonie: 'filhramonie.html',
         testing: 'testing.html',
         forum: 'forum.html',
+        soundWaves: 'sound-waves.html',
       },
     },
   },

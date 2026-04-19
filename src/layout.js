@@ -4,6 +4,18 @@ const CANVAS_W = Math.round(1080 * 297 / 210);
 const CANVAS_H = 1080;
 const POSTER_W = 595;
 const POSTER_H = 842;
+const A3_PRINT_DPI = 300;
+function mmToPrintPx(mm) {
+  return Math.round((mm / 25.4) * A3_PRINT_DPI);
+}
+const PNG_A3_PORTRAIT_W = mmToPrintPx(297);
+const PNG_A3_PORTRAIT_H = mmToPrintPx(420);
+const PNG_A3_LANDSCAPE_W = mmToPrintPx(420);
+const PNG_A3_LANDSCAPE_H = mmToPrintPx(297);
+const TEXTURE_BITMAP_UPLOAD_MAX_BYTES = 512 * 1024;
+const SVG_EMBED_TEXTURE_MAX_EDGE_PX = 1024;
+const SVG_EMBED_JPEG_QUALITY = 0.82;
+const SVG_EMBED_DATAURL_SKIP_REOPT_BYTES = 600_000;
 const LAYOUT_MEDIA_MAX_WIDTH = 1440;
 const LAYOUT_MEDIA_QUERY = `(max-width: ${LAYOUT_MEDIA_MAX_WIDTH}px)`;
 const LAYOUT_MARGIN = 48;
@@ -303,6 +315,7 @@ function syncTextureBlur(state) {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
 
 function mixRgbTowardWhite(rgb, t) {
   const u = Math.min(1, Math.max(0, t));
@@ -874,9 +887,11 @@ function applyBitmapPatternToSvgPaths(defs, paths, pat) {
       p.setAttribute('patternContentUnits', 'objectBoundingBox');
       p.setAttribute('width', '1');
       p.setAttribute('height', '1');
+      p.setAttribute('patternTransform', 'translate(0,1) scale(1,-1)');
       p.setAttribute('data-texfill', '1');
       const img = doc.createElementNS(SVG_NS, 'image');
       img.setAttribute('href', pat.bitmapUrl);
+      img.setAttributeNS(XLINK_NS, 'xlink:href', pat.bitmapUrl);
       img.setAttribute('x', String(io));
       img.setAttribute('y', String(io));
       img.setAttribute('width', String(iw));
@@ -894,9 +909,11 @@ function applyBitmapPatternToSvgPaths(defs, paths, pat) {
   p.setAttribute('patternUnits', 'userSpaceOnUse');
   p.setAttribute('width', String(w));
   p.setAttribute('height', String(h));
+  p.setAttribute('patternTransform', `translate(0,${h}) scale(1,-1)`);
   p.setAttribute('data-texfill', '1');
   const img = doc.createElementNS(SVG_NS, 'image');
   img.setAttribute('href', pat.bitmapUrl);
+  img.setAttributeNS(XLINK_NS, 'xlink:href', pat.bitmapUrl);
   img.setAttribute('width', String(w));
   img.setAttribute('height', String(h));
   img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
@@ -1256,27 +1273,106 @@ function applySvgExportBlur(svgRoot, state) {
   if (blurLayer2 && g2) g2.setAttribute('filter', 'url(#export-blur-layer2)');
 }
 
-function blobToDataUrl(blob) {
+function loadImageElement(src) {
   return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('img'));
+    img.src = src;
   });
+}
+
+function canvasHasNonOpaqueAlpha(ctx, w, h) {
+  const sx = Math.max(1, Math.ceil(w / 32));
+  const sy = Math.max(1, Math.ceil(h / 32));
+  for (let iy = 0; iy < h; iy += sy) {
+    for (let ix = 0; ix < w; ix += sx) {
+      const d = ctx.getImageData(ix, iy, 1, 1).data;
+      if (d[3] < 255) return true;
+    }
+  }
+  return false;
+}
+
+function imageElementToOptimizedSvgDataUrl(img, mimeHint) {
+  const sw = img.naturalWidth || img.width;
+  const sh = img.naturalHeight || img.height;
+  if (!sw || !sh) throw new Error('svg embed size');
+  const maxE = SVG_EMBED_TEXTURE_MAX_EDGE_PX;
+  const scale = Math.min(1, maxE / Math.max(sw, sh));
+  const dw = Math.max(1, Math.round(sw * scale));
+  const dh = Math.max(1, Math.round(sh * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = dw;
+  canvas.height = dh;
+  const ctx = canvas.getContext('2d');
+  const hint = String(mimeHint || '').toLowerCase();
+  if (hint.includes('jpeg') || hint.includes('jpg')) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, dw, dh);
+  }
+  ctx.drawImage(img, 0, 0, dw, dh);
+  if (canvasHasNonOpaqueAlpha(ctx, dw, dh)) {
+    return canvas.toDataURL('image/png');
+  }
+  return canvas.toDataURL('image/jpeg', SVG_EMBED_JPEG_QUALITY);
+}
+
+async function blobToOptimizedSvgEmbedDataUrl(blob) {
+  const o = URL.createObjectURL(blob);
+  try {
+    const img = await loadImageElement(o);
+    return imageElementToOptimizedSvgDataUrl(img, blob.type);
+  } finally {
+    URL.revokeObjectURL(o);
+  }
 }
 
 async function resolveImageUrlForSvgExport(url) {
   const u = String(url || '').trim();
   if (!u) return '';
-  if (u.startsWith('data:')) return u;
+  if (u.startsWith('data:')) {
+    if (u.length <= SVG_EMBED_DATAURL_SKIP_REOPT_BYTES) return u;
+    try {
+      const res = await fetch(u);
+      const blob = await res.blob();
+      return await blobToOptimizedSvgEmbedDataUrl(blob);
+    } catch (e) {
+      console.warn('[SVG export] data URL:', e);
+      return u;
+    }
+  }
   try {
     const res = await fetch(u);
     if (!res.ok) throw new Error(String(res.status));
     const blob = await res.blob();
-    return await blobToDataUrl(blob);
+    return await blobToOptimizedSvgEmbedDataUrl(blob);
   } catch (e) {
-    console.warn('[SVG export] Nepodařilo se vložit obrázek:', e);
-    return u;
+    try {
+      const img = await loadImageElement(u);
+      return imageElementToOptimizedSvgDataUrl(img, '');
+    } catch (e2) {
+      console.warn('[SVG export] Nepodařilo se vložit obrázek:', e, e2);
+      return u;
+    }
+  }
+}
+
+async function embedSvgImageHrefsAsDataUrls(svgRoot) {
+  const images = svgRoot.querySelectorAll('image');
+  const cache = new Map();
+  for (const el of images) {
+    const href = el.getAttribute('href') || el.getAttributeNS(XLINK_NS, 'href');
+    if (!href) continue;
+    let data = cache.get(href);
+    if (data === undefined) {
+      data = await resolveImageUrlForSvgExport(href);
+      cache.set(href, data);
+    }
+    if (data && String(data).startsWith('data:')) {
+      el.setAttribute('href', data);
+      el.setAttributeNS(XLINK_NS, 'xlink:href', data);
+    }
   }
 }
 
@@ -1308,8 +1404,12 @@ async function finalizeSvgForExport(svgStr, state) {
   const root = pdoc.documentElement;
   if (!root || root.localName !== 'svg') return svgStr;
   if (!root.querySelector('#layer1') && !root.querySelector('g[data-layout-pair-cutout="1"]')) return svgStr;
+  if (!root.getAttribute('xmlns:xlink')) {
+    root.setAttribute('xmlns:xlink', XLINK_NS);
+  }
   syncTextureFillSvgDoc(root, exportState);
   applySvgExportBlur(root, exportState);
+  await embedSvgImageHrefsAsDataUrls(root);
   const serialized = new XMLSerializer().serializeToString(root);
   return `<?xml version="1.0" encoding="UTF-8"?>\n${serialized}`;
 }
@@ -1512,6 +1612,8 @@ function resetNahodneTextureEfekty(state) {
   state.texturePatternStripesRatio2 = 0.5;
   state.texturePatternBitmapUrl1 = '';
   state.texturePatternBitmapUrl2 = '';
+  state.texturePatternBitmapFilename1 = '';
+  state.texturePatternBitmapFilename2 = '';
   state.texturePatternBitmapScale1 = 100;
   state.texturePatternBitmapScale2 = 100;
   state.texturePatternBitmapPerShape1 = false;
@@ -1628,8 +1730,17 @@ function syncTextureSubpanelVisibility(state) {
   if (bw2) bw2.hidden = !bm2;
 }
 
+function bitmapTextureFileAllowed(file) {
+  if (!file) return false;
+  const t = String(file.type || '').trim().toLowerCase();
+  if (t.startsWith('image/')) return true;
+  const n = String(file.name || '').toLowerCase();
+  return /\.(png|jpe?g)$/.test(n);
+}
+
 function revokeTexturePatternBitmap(state, layerNum) {
   const uKey = layerNum === 1 ? 'texturePatternBitmapUrl1' : 'texturePatternBitmapUrl2';
+  const nameKey = layerNum === 1 ? 'texturePatternBitmapFilename1' : 'texturePatternBitmapFilename2';
   const cur = state[uKey];
   if (cur && String(cur).startsWith('blob:')) {
     try {
@@ -1637,6 +1748,7 @@ function revokeTexturePatternBitmap(state, layerNum) {
     } catch {}
   }
   state[uKey] = '';
+  state[nameKey] = '';
 }
 
 function refreshTexturePatParamLabelsFromState(state) {
@@ -1705,6 +1817,18 @@ function syncTexturePatternControlsFromState(state) {
   if (bps1) bps1.checked = !!state.texturePatternBitmapPerShape1;
   const bps2 = document.getElementById('layout-texture-pat-bitmap-per-shape-2');
   if (bps2) bps2.checked = !!state.texturePatternBitmapPerShape2;
+  const bn1 = document.getElementById('layout-texture-pat-bitmap-name-1');
+  if (bn1) {
+    const fn1 = String(state.texturePatternBitmapFilename1 || '').trim();
+    bn1.textContent = fn1;
+    bn1.hidden = !fn1;
+  }
+  const bn2 = document.getElementById('layout-texture-pat-bitmap-name-2');
+  if (bn2) {
+    const fn2 = String(state.texturePatternBitmapFilename2 || '').trim();
+    bn2.textContent = fn2;
+    bn2.hidden = !fn2;
+  }
   refreshTexturePatParamLabelsFromState(state);
   syncTextureSubpanelVisibility(state);
 }
@@ -2341,6 +2465,14 @@ ${layoutSvgLayersInner(layer1Paths, layer2Paths)}
 </svg>`;
 }
 
+function layer1ExportVisible(state) {
+  return !!state.layer1Visible && state.layer1PreviewVisible !== false;
+}
+
+function layer2ExportVisible(state) {
+  return !!state.layer2Visible && state.layer2PreviewVisible !== false;
+}
+
 function updateLayoutFooter(state, stageIndices1, stageIndices2) {
   const fontInfoEl1 = document.getElementById('layout-font-info-1');
   const fontInfoEl2 = document.getElementById('layout-font-info-2');
@@ -2388,6 +2520,10 @@ font-feature-settings: ${feature};`;
 
 function renderLayout(state, stageIndices1, stageIndices2) {
   const { container, fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible, fontFeatureSettings } = state;
+  const pv1 = state.layer1PreviewVisible !== false;
+  const pv2 = state.layer2PreviewVisible !== false;
+  const hideL1Display = !layer1Visible || !pv1;
+  const hideL2Display = !layer2Visible || !pv2;
   const layoutGlyphAnchor = state.layoutGlyphAnchor || 'bottom';
   const centerAnchors = layoutGlyphAnchor === 'center';
   const feature = fontFeatureSettings || '"ss04" 1';
@@ -2409,10 +2545,10 @@ function renderLayout(state, stageIndices1, stageIndices2) {
 
   const layer1 = document.createElement('div');
   layer1.className = 'layout-layer1';
-  layer1.style.cssText = `position: absolute; inset: 0;${layer1Visible === false ? ' visibility: hidden;' : ''}`;
+  layer1.style.cssText = `position: absolute; inset: 0;${hideL1Display ? ' visibility: hidden;' : ''}`;
   const layer2 = document.createElement('div');
   layer2.className = 'layout-layer2';
-  layer2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${layer2Visible === false ? ' visibility: hidden;' : ''}`;
+  layer2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${hideL2Display ? ' visibility: hidden;' : ''}`;
 
   const fkFeat = layoutFeatureCssToFontKit(feature);
   const fk1 = getResolvedLayoutFontKit(fontName1);
@@ -2896,6 +3032,10 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
   if (!posterContainer) return;
 
   const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const pv1 = state.layer1PreviewVisible !== false;
+  const pv2 = state.layer2PreviewVisible !== false;
+  const hideL1Display = !layer1Visible || !pv1;
+  const hideL2Display = !layer2Visible || !pv2;
   const feature = posterFeatureKeyToCss(posterFeatureKey);
 
   const stage1 = stageIndices1[0] % NUM_STAGES;
@@ -2930,10 +3070,10 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
 
   const layer1 = document.createElement('div');
   layer1.className = 'poster-layer1';
-  layer1.style.cssText = `position: absolute; inset: 0;${layer1Visible === false ? ' visibility: hidden;' : ''}`;
+  layer1.style.cssText = `position: absolute; inset: 0;${hideL1Display ? ' visibility: hidden;' : ''}`;
   const layer2 = document.createElement('div');
   layer2.className = 'poster-layer2';
-  layer2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${layer2Visible === false ? ' visibility: hidden;' : ''}`;
+  layer2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${hideL2Display ? ' visibility: hidden;' : ''}`;
 
   const fk1 = getResolvedLayoutFontKit(fontName1);
   const fk2 = getResolvedLayoutFontKit(fontName2);
@@ -3046,6 +3186,8 @@ function scalePosterToFit(container) {
 
 function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter, posterNumber, posterFeatureKey) {
   const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const pv1 = state.layer1PreviewVisible !== false;
+  const pv2 = state.layer2PreviewVisible !== false;
   const feature = posterFeatureKeyToCss(posterFeatureKey);
 
   const stage1 = stageIndices1[0] % NUM_STAGES;
@@ -3093,8 +3235,8 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
     gCtx.restore();
   };
 
-  if (layer1Visible) drawGlyph(ctx, logo1Color, fontName1, variation1, fitScale, centerX, centerY, letter);
-  if (layer2Visible) {
+  if (layer1Visible && pv1) drawGlyph(ctx, logo1Color, fontName1, variation1, fitScale, centerX, centerY, letter);
+  if (layer2Visible && pv2) {
     ctx.globalCompositeOperation = 'multiply';
     drawGlyph(ctx, logo2Color, fontName2, variation2, fitScale, centerX, centerY, number);
     ctx.globalCompositeOperation = 'source-over';
@@ -3165,7 +3307,7 @@ async function savePosterPng(shapes, canvasBg, state) {
   const ts = layoutTimestamp();
   let posterSvg = shapes.posterSvg;
   posterSvg = await finalizeSvgForExport(posterSvg, state);
-  const posterBlob = await svgToPngBlob(posterSvg, POSTER_W, POSTER_H, bg);
+  const posterBlob = await svgToPngBlob(posterSvg, PNG_A3_PORTRAIT_W, PNG_A3_PORTRAIT_H, bg);
   if (posterBlob) downloadBlob(posterBlob, `poster_${ts}.png`);
 }
 
@@ -3432,6 +3574,8 @@ function glyphMaxHalfWidthTimesFit(char, fontKit, axes, fkFeat, fit) {
 
 function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2) {
   const { fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, layer1Visible, layer2Visible } = state;
+  const exp1 = layer1ExportVisible(state);
+  const exp2 = layer2ExportVisible(state);
   const layoutGlyphAnchor = state.layoutGlyphAnchor || 'bottom';
   const centerAnchors = layoutGlyphAnchor === 'center';
   const screenX = state.screenX;
@@ -3582,17 +3726,30 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
     if (cutIdx.length > 0) {
       const stackParts = [];
       for (const ci of cutIdx.sort((x, y) => x - y)) {
-        const holeD = pairFragmentsIntersectPathD(cellL1[ci], cellL2[ci]);
-        const mul = `<g style="mix-blend-mode:multiply">\n${cellL1[ci]}${cellL2[ci]}</g>`;
-        const holePath = holeD
-          ? `\n  <path fill="${escapeXmlAttr(bgHex)}" d="${escapeXmlAttr(holeD)}"/>`
-          : '';
-        stackParts.push(`<g data-layout-pair-cutout="1">\n${mul}${holePath}\n</g>`);
+        const raw1 = cellL1[ci];
+        const raw2 = cellL2[ci];
+        const a = exp1 ? raw1 : '';
+        const b = exp2 ? raw2 : '';
+        if (!a && !b) continue;
+        if (a && b) {
+          const holeD = pairFragmentsIntersectPathD(raw1, raw2);
+          const mul = `<g style="mix-blend-mode:multiply">\n${raw1}${raw2}</g>`;
+          const holePath = holeD
+            ? `\n  <path fill="${escapeXmlAttr(bgHex)}" d="${escapeXmlAttr(holeD)}"/>`
+            : '';
+          stackParts.push(`<g data-layout-pair-cutout="1">\n${mul}${holePath}\n</g>`);
+        } else if (a) {
+          stackParts.push(`<g data-layout-pair-cutout="1">\n<g>\n${raw1}\n</g>\n</g>`);
+        } else {
+          stackParts.push(`<g data-layout-pair-cutout="1">\n<g style="mix-blend-mode:multiply">\n${raw2}\n</g>\n</g>`);
+        }
       }
+      const b1e = exp1 ? base1 : '';
+      const b2e = exp2 ? base2 : '';
       const layoutSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
-${layoutSvgLayersInner(base1, base2)}
+${layoutSvgLayersInner(b1e, b2e)}
 ${stackParts.join('\n')}
 </svg>`;
       return {
@@ -3620,12 +3777,14 @@ ${stackParts.join('\n')}
   );
   const exportCrop = layoutExportCropBox(contentBounds);
 
-  const layoutSvg = layoutSvgStringNormal(layer1Paths, layer2Paths, bgHex, null);
+  const out1 = exp1 ? layer1Paths : '';
+  const out2 = exp2 ? layer2Paths : '';
+  const layoutSvg = layoutSvgStringNormal(out1, out2, bgHex, null);
   let layoutSvgExport = layoutSvg;
   let layoutExportW = CANVAS_W;
   let layoutExportH = CANVAS_H;
   if (exportCrop) {
-    layoutSvgExport = layoutSvgStringNormal(layer1Paths, layer2Paths, bgHex, exportCrop);
+    layoutSvgExport = layoutSvgStringNormal(out1, out2, bgHex, exportCrop);
     layoutExportW = exportCrop.vw;
     layoutExportH = exportCrop.vh;
   }
@@ -3668,7 +3827,7 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
   let layer1Paths = '';
   let layer2Paths = '';
 
-  if (layer1Visible && glyph1) {
+  if (layer1ExportVisible(state) && glyph1) {
     const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyph1.pivotX},${-glyph1.pivotYCenter})`;
     layer1Paths = '';
     glyph1.contours.forEach((sub, si) => {
@@ -3677,7 +3836,7 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
       layer1Paths += `  <path data-sub="${si}" data-tex-layer="1" d="${escapeXmlAttr(sub.pathData)}" fill="${c1}" transform="${tr}"/>\n`;
     });
   }
-  if (layer2Visible && glyph2) {
+  if (layer2ExportVisible(state) && glyph2) {
     const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyph2.pivotX},${-glyph2.pivotYCenter})`;
     layer2Paths = '';
     glyph2.contours.forEach((sub, si) => {
@@ -4014,6 +4173,8 @@ export function initLayout(containerId) {
         exportCellHeight: geomDefaultExport.cellHeight,
         layer1Visible: true,
         layer2Visible: true,
+        layer1PreviewVisible: true,
+        layer2PreviewVisible: true,
         layoutGlyphAnchor: 'bottom',
         randomizeStyling: false,
         extremeStyling: false,
@@ -4057,6 +4218,8 @@ export function initLayout(containerId) {
         texturePatternStripesRatio2: 0.5,
         texturePatternBitmapUrl1: '',
         texturePatternBitmapUrl2: '',
+        texturePatternBitmapFilename1: '',
+        texturePatternBitmapFilename2: '',
         texturePatternBitmapScale1: 100,
         texturePatternBitmapScale2: 100,
         texturePatternBitmapPerShape1: false,
@@ -4134,27 +4297,60 @@ export function initLayout(containerId) {
           else if (state.orientationAxesMode) state.axesPool = generateRandomAxes();
           else state.axesPool = generateRandomAxes();
         }
+        const finishPaint = () => {
+          const pi = getPosterInputs();
+          renderPoster(state, stageIndices1, stageIndices2, pi.letter, pi.number, pi.featureKey);
+          updateLayoutFooter(state, stageIndices1, stageIndices2);
+          syncCanvasChromeBg(state);
+          if (updateLayer1Swatch) updateLayer1Swatch();
+          if (updateLayer2Swatch) updateLayer2Swatch();
+          if (updateCanvasBgSwatch) updateCanvasBgSwatch();
+          const blurRangeEl = document.getElementById('layout-texture-blur-amount');
+          const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
+          if (blurRangeEl) blurRangeEl.value = String(state.textureBlurPx ?? 0);
+          if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx ?? 0} px`;
+          const blurL1 = document.getElementById('layout-texture-blur-l1');
+          const blurL2 = document.getElementById('layout-texture-blur-l2');
+          if (blurL1) blurL1.checked = !!state.textureBlurLayer1;
+          if (blurL2) blurL2.checked = !!state.textureBlurLayer2;
+          const layerVis1 = document.getElementById('layout-layer-visible-1');
+          const layerVis2 = document.getElementById('layout-layer-visible-2');
+          if (layerVis1) layerVis1.checked = state.layer1PreviewVisible !== false;
+          if (layerVis2) layerVis2.checked = state.layer2PreviewVisible !== false;
+          syncTextureGradientControlsFromState(state);
+          syncTexturePatternControlsFromState(state);
+          syncPathOutlineControlsFromState(state);
+          syncTextureBlur(state);
+          syncTextureRadial(state);
+        };
+        if (convertedShapes && krok1ConfirmedForSvg) {
+          convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs)
+            .then((shapes) => {
+              if (!shapes) {
+                renderLayout(state, stageIndices1, stageIndices2);
+                finishPaint();
+                return;
+              }
+              convertedShapes = shapes;
+              displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, {
+                canvasBg: state.canvasBg,
+                state
+              });
+              requestAnimationFrame(() => {
+                scaleLayoutToFit(container);
+                scalePosterToFit(document.getElementById('poster-canvas'));
+              });
+              finishPaint();
+            })
+            .catch((e) => {
+              console.error('Vector refresh failed:', e);
+              renderLayout(state, stageIndices1, stageIndices2);
+              finishPaint();
+            });
+          return;
+        }
         renderLayout(state, stageIndices1, stageIndices2);
-        const pi = getPosterInputs();
-        renderPoster(state, stageIndices1, stageIndices2, pi.letter, pi.number, pi.featureKey);
-        updateLayoutFooter(state, stageIndices1, stageIndices2);
-        syncCanvasChromeBg(state);
-        if (updateLayer1Swatch) updateLayer1Swatch();
-        if (updateLayer2Swatch) updateLayer2Swatch();
-        if (updateCanvasBgSwatch) updateCanvasBgSwatch();
-        const blurRangeEl = document.getElementById('layout-texture-blur-amount');
-        const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
-        if (blurRangeEl) blurRangeEl.value = String(state.textureBlurPx ?? 0);
-        if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx ?? 0} px`;
-        const blurL1 = document.getElementById('layout-texture-blur-l1');
-        const blurL2 = document.getElementById('layout-texture-blur-l2');
-        if (blurL1) blurL1.checked = !!state.textureBlurLayer1;
-        if (blurL2) blurL2.checked = !!state.textureBlurLayer2;
-        syncTextureGradientControlsFromState(state);
-        syncTexturePatternControlsFromState(state);
-        syncPathOutlineControlsFromState(state);
-        syncTextureBlur(state);
-        syncTextureRadial(state);
+        finishPaint();
       };
 
       const reRender = () => {
@@ -4394,19 +4590,35 @@ export function initLayout(containerId) {
         }
       });
 
-      document.getElementById('layout-btn-png-logo')?.addEventListener('click', () => {
-        saveLayoutPng(convertedShapes, state.canvasBg, state).catch((e) => console.error('PNG layout failed:', e));
+      document.getElementById('layout-btn-png-logo')?.addEventListener('click', async () => {
+        let shapes = convertedShapes;
+        if (shapes && krok1ConfirmedForSvg) {
+          const s = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+          if (s) shapes = s;
+        }
+        saveLayoutPng(shapes, state.canvasBg, state).catch((e) => console.error('PNG layout failed:', e));
       });
-      document.getElementById('layout-btn-png-plakat')?.addEventListener('click', () => {
-        savePosterPng(convertedShapes, state.canvasBg, state).catch((e) => console.error('PNG poster failed:', e));
+      document.getElementById('layout-btn-png-plakat')?.addEventListener('click', async () => {
+        let shapes = convertedShapes;
+        if (shapes && krok1ConfirmedForSvg) {
+          const s = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+          if (s) shapes = s;
+        }
+        savePosterPng(shapes, state.canvasBg, state).catch((e) => console.error('PNG poster failed:', e));
       });
-      document.getElementById('layout-btn-svg-logo')?.addEventListener('click', () => {
+      document.getElementById('layout-btn-svg-logo')?.addEventListener('click', async () => {
         if (!convertedShapes || !krok1ConfirmedForSvg) return;
-        saveLayoutSvg(convertedShapes, state).catch((e) => console.error('SVG layout failed:', e));
+        let shapes = convertedShapes;
+        const s = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+        if (s) shapes = s;
+        saveLayoutSvg(shapes, state).catch((e) => console.error('SVG layout failed:', e));
       });
-      document.getElementById('layout-btn-svg-plakat')?.addEventListener('click', () => {
+      document.getElementById('layout-btn-svg-plakat')?.addEventListener('click', async () => {
         if (!convertedShapes || !krok1ConfirmedForSvg) return;
-        savePosterSvg(convertedShapes, state).catch((e) => console.error('SVG poster failed:', e));
+        let shapes = convertedShapes;
+        const s = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+        if (s) shapes = s;
+        savePosterSvg(shapes, state).catch((e) => console.error('SVG poster failed:', e));
       });
       document.getElementById('layout-btn-unify')?.addEventListener('click', () => updateMode('unify'));
       document.getElementById('layout-btn-symmetrical')?.addEventListener('click', () => updateMode('symmetrical'));
@@ -4430,6 +4642,15 @@ export function initLayout(containerId) {
       document.getElementById('layout-btn-layer2')?.addEventListener('click', () => {
         state.layer2Visible = !state.layer2Visible;
         reRender();
+      });
+
+      document.getElementById('layout-layer-visible-1')?.addEventListener('change', (e) => {
+        state.layer1PreviewVisible = e.target.checked;
+        paintView();
+      });
+      document.getElementById('layout-layer-visible-2')?.addEventListener('change', (e) => {
+        state.layer2PreviewVisible = e.target.checked;
+        paintView();
       });
 
       document.getElementById('layout-btn-random-omit-shapes')?.addEventListener('click', async () => {
@@ -5073,13 +5294,25 @@ export function initLayout(containerId) {
 
       document.getElementById('layout-texture-pat-bitmap-file-1')?.addEventListener('change', (e) => {
         const f = e.target.files?.[0];
-        if (!f || !String(f.type || '').startsWith('image/')) {
+        if (!f) {
           e.target.value = '';
+          return;
+        }
+        if (!bitmapTextureFileAllowed(f)) {
+          e.target.value = '';
+          window.alert('Vyberte obrázek PNG nebo JPEG (JPG).');
+          return;
+        }
+        if (f.size > TEXTURE_BITMAP_UPLOAD_MAX_BYTES) {
+          e.target.value = '';
+          window.alert(`Soubor je příliš velký (max ${Math.round(TEXTURE_BITMAP_UPLOAD_MAX_BYTES / 1024)} KB).`);
           return;
         }
         revokeTexturePatternBitmap(state, 1);
         state.texturePatternBitmapUrl1 = URL.createObjectURL(f);
+        state.texturePatternBitmapFilename1 = f.name || '';
         e.target.value = '';
+        syncTexturePatternControlsFromState(state);
         syncTextureRadial(state);
       });
       document.getElementById('layout-texture-pat-bitmap-clear-1')?.addEventListener('click', () => {
@@ -5089,13 +5322,25 @@ export function initLayout(containerId) {
       });
       document.getElementById('layout-texture-pat-bitmap-file-2')?.addEventListener('change', (e) => {
         const f = e.target.files?.[0];
-        if (!f || !String(f.type || '').startsWith('image/')) {
+        if (!f) {
           e.target.value = '';
+          return;
+        }
+        if (!bitmapTextureFileAllowed(f)) {
+          e.target.value = '';
+          window.alert('Vyberte obrázek PNG nebo JPEG (JPG).');
+          return;
+        }
+        if (f.size > TEXTURE_BITMAP_UPLOAD_MAX_BYTES) {
+          e.target.value = '';
+          window.alert(`Soubor je příliš velký (max ${Math.round(TEXTURE_BITMAP_UPLOAD_MAX_BYTES / 1024)} KB).`);
           return;
         }
         revokeTexturePatternBitmap(state, 2);
         state.texturePatternBitmapUrl2 = URL.createObjectURL(f);
+        state.texturePatternBitmapFilename2 = f.name || '';
         e.target.value = '';
+        syncTexturePatternControlsFromState(state);
         syncTextureRadial(state);
       });
       document.getElementById('layout-texture-pat-bitmap-clear-2')?.addEventListener('click', () => {

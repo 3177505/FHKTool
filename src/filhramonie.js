@@ -4,6 +4,14 @@ const CANVAS_W = Math.round(1080 * 297 / 210);
 const CANVAS_H = 1080;
 const POSTER_W = 595;
 const POSTER_H = 842;
+const A3_PRINT_DPI = 300;
+function mmToPrintPx(mm) {
+  return Math.round((mm / 25.4) * A3_PRINT_DPI);
+}
+const PNG_A3_PORTRAIT_W = mmToPrintPx(297);
+const PNG_A3_PORTRAIT_H = mmToPrintPx(420);
+const PNG_A3_LANDSCAPE_W = mmToPrintPx(420);
+const PNG_A3_LANDSCAPE_H = mmToPrintPx(297);
 const LAYOUT_MEDIA_MAX_WIDTH = 1440;
 const LAYOUT_MEDIA_QUERY = `(max-width: ${LAYOUT_MEDIA_MAX_WIDTH}px)`;
 const LAYOUT_MARGIN = 48;
@@ -11,7 +19,7 @@ const BOTTOM_MARGIN = 48;
 const CELL_PADDING = 4;
 const FONT_SIZE_LOAD = 200;
 const GLYPH_SIZE_FACTOR = 12;
-const LAYOUT_SHAPES_DISPLAY_SCALE = 1.5;
+const LAYOUT_SHAPES_DISPLAY_SCALE = 1;
 const D_OFFSET_Y = 0.20;
 const NUM_STAGES = 9;
 
@@ -134,25 +142,25 @@ function clearShapePairCutoutState(state) {
   state.posterRandomPairCutout = false;
 }
 
-function subcontourLocalScaleSuffix(sub, pivotX, py, perSlotMap, slotIdx, subIdx) {
+function subcontourLocalScaleSuffix(sub, _pivotX, _py, perSlotMap, slotIdx, subIdx) {
   const inner = perSlotMap && perSlotMap.get(slotIdx);
   const sc = inner && inner.get(subIdx);
   const s = sc != null && Number.isFinite(sc) ? sc : 1;
   if (Math.abs(s - 1) < 1e-6) return '';
-  const cxRel = sub.cx - pivotX;
-  const cyRel = sub.cy - py;
+  const cx = sub.cx;
+  const cy = sub.cy;
   const rq = Math.round(s * 1000) / 1000;
-  return ` translate(${cxRel},${cyRel}) scale(${rq}) translate(${-cxRel},${-cyRel})`;
+  return ` translate(${cx},${cy}) scale(${rq}) translate(${-cx},${-cy})`;
 }
 
-function filhPosterScaleSuffix(sub, pivotX, py, map, tag, si) {
+function filhPosterScaleSuffix(sub, _pivotX, _py, map, tag, si) {
   const sc = map.get(`${tag}:${si}`);
   const s = sc != null && Number.isFinite(sc) ? sc : 1;
   if (Math.abs(s - 1) < 1e-6) return '';
-  const cxRel = sub.cx - pivotX;
-  const cyRel = sub.cy - py;
+  const cx = sub.cx;
+  const cy = sub.cy;
   const rq = Math.round(s * 1000) / 1000;
-  return ` translate(${cxRel},${cyRel}) scale(${rq}) translate(${-cxRel},${-cyRel})`;
+  return ` translate(${cx},${cy}) scale(${rq}) translate(${-cx},${-cy})`;
 }
 
 function logNahodneVynechatTvaryDebug(state, pointIds, shapes, pickMeta) {
@@ -908,10 +916,46 @@ function createStageIndices(mode, numPoints, pointIds, stageCap = NUM_STAGES) {
   return { stageIndices1, stageIndices2 };
 }
 
+function layoutFeatureCssToFontKit(css) {
+  const fk = {};
+  const s = String(css || '');
+  for (const m of s.matchAll(/"?(ss\d+)"?\s+1/gi)) fk[m[1]] = 1;
+  if (Object.keys(fk).length) return fk;
+  return { ss04: 1 };
+}
+
+function glyphCenterHalfSpanTimesFit(char, fontKit, axes, fkFeat, fit) {
+  if (!fontKit || fit == null || !Number.isFinite(fit)) return null;
+  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, fkFeat);
+  if (!g) return null;
+  const boxMinY = g.bottomY;
+  const boxMaxY = g.bottomY + g.height;
+  const half = Math.max(boxMaxY - g.pivotYCenter, g.pivotYCenter - boxMinY);
+  return half * fit;
+}
+
+function glyphHeightAboveBottomPivotTimesFit(char, fontKit, axes, fkFeat, fit) {
+  if (!fontKit || !Number.isFinite(fit)) return null;
+  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, fkFeat);
+  if (!g) return null;
+  const boxMaxY = g.bottomY + g.height;
+  return Math.max(0, boxMaxY - g.pivotYBottom) * fit;
+}
+
+function glyphMaxHalfWidthTimesFit(char, fontKit, axes, fkFeat, fit) {
+  if (!fontKit || !Number.isFinite(fit)) return null;
+  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, fkFeat);
+  if (!g) return null;
+  const minX = g.cx - g.width / 2;
+  const maxX = g.cx + g.width / 2;
+  return Math.max(g.pivotX - minX, maxX - g.pivotX) * fit;
+}
+
 function computeLayoutVerticalCenterShift(state, stageIndices1, stageIndices2, sx, sy, cellGeom) {
   const layoutGlyphAnchor = state.layoutGlyphAnchor || 'bottom';
   const centerAnchors = layoutGlyphAnchor === 'center';
   const feature = state.fontFeatureSettings || '"ss04" 1';
+  const fkFeat = layoutFeatureCssToFontKit(feature);
   const { fontName1, fontName2, pointIds, numPoints, layer1Visible, layer2Visible } = state;
   const { availCellW, availCellH, cellHeight } = cellGeom;
   const fk1 = getResolvedLayoutFontKit(fontName1);
@@ -946,11 +990,11 @@ function computeLayoutVerticalCenterShift(state, stageIndices1, stageIndices2, s
     if (centerAnchors) {
       let maxHalf = 0;
       if (layer1Visible) {
-        const ink = filhramonieInkHalfHeightTimesFit(char, fk1, axes1, fitUnified);
+        const ink = glyphCenterHalfSpanTimesFit(char, fk1, axes1, fkFeat, fitUnified);
         maxHalf = Math.max(maxHalf, ink ?? (h1 * fitUnified) / 2);
       }
       if (layer2Visible) {
-        const ink = filhramonieInkHalfHeightTimesFit(char, fk2, axes2, fitUnified);
+        const ink = glyphCenterHalfSpanTimesFit(char, fk2, axes2, fkFeat, fitUnified);
         maxHalf = Math.max(maxHalf, ink ?? (h2 * fitUnified) / 2);
       }
       if (maxHalf <= 0) continue;
@@ -959,11 +1003,11 @@ function computeLayoutVerticalCenterShift(state, stageIndices1, stageIndices2, s
     } else {
       let maxH = 0;
       if (layer1Visible) {
-        const ink = filhramonieInkFullHeightTimesFit(char, fk1, axes1, fitScale1);
+        const ink = glyphHeightAboveBottomPivotTimesFit(char, fk1, axes1, fkFeat, fitScale1);
         maxH = Math.max(maxH, ink ?? h1 * fitScale1);
       }
       if (layer2Visible) {
-        const ink = filhramonieInkFullHeightTimesFit(char, fk2, axes2, fitScale2);
+        const ink = glyphHeightAboveBottomPivotTimesFit(char, fk2, axes2, fkFeat, fitScale2);
         maxH = Math.max(maxH, ink ?? h2 * fitScale2);
       }
       if (maxH <= 0) continue;
@@ -982,6 +1026,7 @@ function computeLayoutContentBoundsWithShift(state, stageIndices1, stageIndices2
   const layoutGlyphAnchor = state.layoutGlyphAnchor || 'bottom';
   const centerAnchors = layoutGlyphAnchor === 'center';
   const feature = state.fontFeatureSettings || '"ss04" 1';
+  const fkFeat = layoutFeatureCssToFontKit(feature);
   const { fontName1, fontName2, pointIds, numPoints, layer1Visible, layer2Visible } = state;
   const { availCellW, availCellH, cellHeight } = cellGeom;
   const fk1 = getResolvedLayoutFontKit(fontName1);
@@ -1018,15 +1063,15 @@ function computeLayoutContentBoundsWithShift(state, stageIndices1, stageIndices2
       let maxHalfY = 0;
       let halfW = 0;
       if (layer1Visible) {
-        const inkY = filhramonieInkHalfHeightTimesFit(char, fk1, axes1, fitUnified);
+        const inkY = glyphCenterHalfSpanTimesFit(char, fk1, axes1, fkFeat, fitUnified);
         maxHalfY = Math.max(maxHalfY, inkY ?? (h1 * fitUnified) / 2);
-        const inkWi = filhramonieInkHalfWidthTimesFit(char, fk1, axes1, fitUnified);
+        const inkWi = glyphMaxHalfWidthTimesFit(char, fk1, axes1, fkFeat, fitUnified);
         halfW = Math.max(halfW, inkWi ?? (w1 * fitUnified) / 2);
       }
       if (layer2Visible) {
-        const inkY = filhramonieInkHalfHeightTimesFit(char, fk2, axes2, fitUnified);
+        const inkY = glyphCenterHalfSpanTimesFit(char, fk2, axes2, fkFeat, fitUnified);
         maxHalfY = Math.max(maxHalfY, inkY ?? (h2 * fitUnified) / 2);
-        const inkWi = filhramonieInkHalfWidthTimesFit(char, fk2, axes2, fitUnified);
+        const inkWi = glyphMaxHalfWidthTimesFit(char, fk2, axes2, fkFeat, fitUnified);
         halfW = Math.max(halfW, inkWi ?? (w2 * fitUnified) / 2);
       }
       if (maxHalfY <= 0) continue;
@@ -1038,15 +1083,15 @@ function computeLayoutContentBoundsWithShift(state, stageIndices1, stageIndices2
       let maxH = 0;
       let halfW = 0;
       if (layer1Visible) {
-        const inkH = filhramonieInkFullHeightTimesFit(char, fk1, axes1, fitScale1);
+        const inkH = glyphHeightAboveBottomPivotTimesFit(char, fk1, axes1, fkFeat, fitScale1);
         maxH = Math.max(maxH, inkH ?? h1 * fitScale1);
-        const inkWi = filhramonieInkHalfWidthTimesFit(char, fk1, axes1, fitScale1);
+        const inkWi = glyphMaxHalfWidthTimesFit(char, fk1, axes1, fkFeat, fitScale1);
         halfW = Math.max(halfW, inkWi ?? (w1 * fitScale1) / 2);
       }
       if (layer2Visible) {
-        const inkH = filhramonieInkFullHeightTimesFit(char, fk2, axes2, fitScale2);
+        const inkH = glyphHeightAboveBottomPivotTimesFit(char, fk2, axes2, fkFeat, fitScale2);
         maxH = Math.max(maxH, inkH ?? h2 * fitScale2);
-        const inkWi = filhramonieInkHalfWidthTimesFit(char, fk2, axes2, fitScale2);
+        const inkWi = glyphMaxHalfWidthTimesFit(char, fk2, axes2, fkFeat, fitScale2);
         halfW = Math.max(halfW, inkWi ?? (w2 * fitScale2) / 2);
       }
       if (maxH <= 0) continue;
@@ -1091,6 +1136,14 @@ function layoutSvgStringNormal(layer1Paths, layer2Paths, bgHex, crop) {
 <rect width="100%" height="100%" fill="${bgHex}"/>
 ${layoutSvgLayersInner(layer1Paths, layer2Paths)}
 </svg>`;
+}
+
+function layer1ExportVisible(state) {
+  return !!state.layer1Visible && state.layer1PreviewVisible !== false;
+}
+
+function layer2ExportVisible(state) {
+  return !!state.layer2Visible && state.layer2PreviewVisible !== false;
 }
 
 function updateLayoutFooter(state, stageIndices1, stageIndices2) {
@@ -1178,6 +1231,10 @@ font-feature-settings: ${posterFeatCss};`;
 
 function renderLayout(state, stageIndices1, stageIndices2) {
   const { container, fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, screenX, screenY, availCellW, availCellH, cellHeight, layer1Visible, layer2Visible, fontFeatureSettings } = state;
+  const pv1 = state.layer1PreviewVisible !== false;
+  const pv2 = state.layer2PreviewVisible !== false;
+  const hideL1Display = !layer1Visible || !pv1;
+  const hideL2Display = !layer2Visible || !pv2;
   const layoutGlyphAnchor = state.layoutGlyphAnchor || 'bottom';
   const centerAnchors = layoutGlyphAnchor === 'center';
   const feature = fontFeatureSettings || '"ss04" 1';
@@ -1199,10 +1256,10 @@ function renderLayout(state, stageIndices1, stageIndices2) {
 
   const layer1 = document.createElement('div');
   layer1.className = 'layout-layer1';
-  layer1.style.cssText = `position: absolute; inset: 0;${layer1Visible === false ? ' visibility: hidden;' : ''}`;
+  layer1.style.cssText = `position: absolute; inset: 0;${hideL1Display ? ' visibility: hidden;' : ''}`;
   const layer2 = document.createElement('div');
   layer2.className = 'layout-layer2';
-  layer2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${layer2Visible === false ? ' visibility: hidden;' : ''}`;
+  layer2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${hideL2Display ? ' visibility: hidden;' : ''}`;
 
   for (let i = 0; i < numPoints; i++) {
     const stage1 = stageIndices1[i] % NUM_STAGES;
@@ -1301,6 +1358,9 @@ function renderLayout(state, stageIndices1, stageIndices2) {
   wrapper.appendChild(layer2);
   container.appendChild(wrapper);
   scaleLayoutToFit(container);
+  requestAnimationFrame(() => {
+    scaleLayoutToFit(container);
+  });
 
   if (typeof window !== 'undefined') {
     window.__layoutRenderDebug = { layoutGlyphAnchor, centerAnchors, renderLayoutDebug };
@@ -1479,6 +1539,10 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
   if (!posterContainer) return;
 
   const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const pv1 = state.layer1PreviewVisible !== false;
+  const pv2 = state.layer2PreviewVisible !== false;
+  const hideL1Display = !layer1Visible || !pv1;
+  const hideL2Display = !layer2Visible || !pv2;
   const feature = posterFeatureKeyToCss(posterFeatureKey);
 
   const sTop1 = stageIndices1[0] % NUM_STAGES;
@@ -1524,10 +1588,10 @@ function renderPoster(state, stageIndices1, stageIndices2, posterLetter, posterN
     half.style.cssText = `position: absolute; inset: 0; clip-path: ${clipInset};`;
     const sub1 = document.createElement('div');
     sub1.className = 'poster-sublayer-1';
-    sub1.style.cssText = `position: absolute; inset: 0;${layer1Visible === false ? ' visibility: hidden;' : ''}`;
+    sub1.style.cssText = `position: absolute; inset: 0;${hideL1Display ? ' visibility: hidden;' : ''}`;
     const sub2 = document.createElement('div');
     sub2.className = 'poster-sublayer-2';
-    sub2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${layer2Visible === false ? ' visibility: hidden;' : ''}`;
+    sub2.style.cssText = `position: absolute; inset: 0; mix-blend-mode: multiply;${hideL2Display ? ' visibility: hidden;' : ''}`;
     const spanA = document.createElement('span');
     spanA.textContent = letter;
     spanA.style.cssText = `
@@ -1591,8 +1655,20 @@ function scalePosterToFit(container) {
   wrapper.style.transform = `translate(-50%, -50%) scale(${scale})`;
 }
 
+function scheduleLayoutAndPosterFit(layoutContainer) {
+  if (!layoutContainer) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      scaleLayoutToFit(layoutContainer);
+      scalePosterToFit(document.getElementById('poster-canvas'));
+    });
+  });
+}
+
 function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter, posterNumber, posterFeatureKey) {
   const { fontName1, fontName2, logo1Color, logo2Color, layer1Visible, layer2Visible } = state;
+  const pv1 = state.layer1PreviewVisible !== false;
+  const pv2 = state.layer2PreviewVisible !== false;
   const feature = posterFeatureKeyToCss(posterFeatureKey);
 
   const sTop1 = stageIndices1[0] % NUM_STAGES;
@@ -1645,7 +1721,7 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
     gCtx.restore();
   };
 
-  if (layer1Visible) {
+  if (layer1Visible && pv1) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, POSTER_W, halfH);
@@ -1653,7 +1729,7 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
     drawGlyph(ctx, logo1Color, fontName1, variationTop1, fitScale, centerX, centerY, letter);
     ctx.restore();
   }
-  if (layer2Visible) {
+  if (layer2Visible && pv2) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, POSTER_W, halfH);
@@ -1663,7 +1739,7 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
     ctx.restore();
     ctx.globalCompositeOperation = 'source-over';
   }
-  if (layer1Visible) {
+  if (layer1Visible && pv1) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, halfH, POSTER_W, halfH);
@@ -1671,7 +1747,7 @@ function renderPosterToCanvas(state, stageIndices1, stageIndices2, posterLetter,
     drawGlyph(ctx, logo1Color, fontName1, variationBot1, fitScale, centerX, centerY, letter);
     ctx.restore();
   }
-  if (layer2Visible) {
+  if (layer2Visible && pv2) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, halfH, POSTER_W, halfH);
@@ -1709,6 +1785,8 @@ function svgToPngBlob(svgString, width, height, bgHex = '#ffffff') {
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.fillStyle = normalizedCanvasBgHex(bgHex);
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
@@ -1736,7 +1814,9 @@ async function saveLayoutPng(shapes, canvasBg) {
   const layoutSvgForFile = shapes.layoutSvgExport || shapes.layoutSvg;
   const layoutW = shapes.layoutExportW ?? CANVAS_W;
   const layoutH = shapes.layoutExportH ?? CANVAS_H;
-  const layoutBlob = await svgToPngBlob(layoutSvgForFile, layoutW, layoutH, bg);
+  const pngW = Math.max(1, Math.round((PNG_A3_LANDSCAPE_W * layoutW) / CANVAS_W));
+  const pngH = Math.max(1, Math.round((PNG_A3_LANDSCAPE_H * layoutH) / CANVAS_H));
+  const layoutBlob = await svgToPngBlob(layoutSvgForFile, pngW, pngH, bg);
   if (layoutBlob) downloadBlob(layoutBlob, `layout_${ts}.png`);
 }
 
@@ -1744,7 +1824,7 @@ async function savePosterPng(shapes, canvasBg) {
   if (!shapes) return;
   const bg = normalizedCanvasBgHex(canvasBg);
   const ts = layoutTimestamp();
-  const posterBlob = await svgToPngBlob(shapes.posterSvg, POSTER_W, POSTER_H, bg);
+  const posterBlob = await svgToPngBlob(shapes.posterSvg, PNG_A3_PORTRAIT_W, PNG_A3_PORTRAIT_H, bg);
   if (posterBlob) downloadBlob(posterBlob, `poster_${ts}.png`);
 }
 
@@ -1970,29 +2050,10 @@ function applyRandomSubcontourScales(state, scaledPicks) {
   }
 }
 
-function filhramonieInkHalfHeightTimesFit(char, fontKit, axes, fit) {
-  if (!fontKit || fit == null || !Number.isFinite(fit)) return null;
-  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, { ss04: 1 });
-  if (!g) return null;
-  return (g.height * fit) / 2;
-}
-
-function filhramonieInkFullHeightTimesFit(char, fontKit, axes, fit) {
-  if (!fontKit || !Number.isFinite(fit)) return null;
-  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, { ss04: 1 });
-  if (!g) return null;
-  return g.height * fit;
-}
-
-function filhramonieInkHalfWidthTimesFit(char, fontKit, axes, fit) {
-  if (!fontKit || !Number.isFinite(fit)) return null;
-  const g = getGlyphPathFromFontKit(fontKit, char, FONT_SIZE_LOAD, axes, { ss04: 1 });
-  if (!g) return null;
-  return (g.width * fit) / 2;
-}
-
 function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2) {
   const { fontName1, fontName2, logo1Color, logo2Color, pointIds, numPoints, layer1Visible, layer2Visible } = state;
+  const exp1 = layer1ExportVisible(state);
+  const exp2 = layer2ExportVisible(state);
   const layoutGlyphAnchor = state.layoutGlyphAnchor || 'bottom';
   const centerAnchors = layoutGlyphAnchor === 'center';
   const screenX = state.screenX;
@@ -2166,17 +2227,30 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
     if (cutIdx.length > 0) {
       const stackParts = [];
       for (const ci of cutIdx.sort((x, y) => x - y)) {
-        const holeD = pairFragmentsIntersectPathD(cellL1[ci], cellL2[ci]);
-        const mul = `<g style="mix-blend-mode:multiply">\n${cellL1[ci]}${cellL2[ci]}</g>`;
-        const holePath = holeD
-          ? `\n  <path fill="${escapeXmlAttr(bgHex)}" d="${escapeXmlAttr(holeD)}"/>`
-          : '';
-        stackParts.push(`<g data-layout-pair-cutout="1">\n${mul}${holePath}\n</g>`);
+        const raw1 = cellL1[ci];
+        const raw2 = cellL2[ci];
+        const a = exp1 ? raw1 : '';
+        const b = exp2 ? raw2 : '';
+        if (!a && !b) continue;
+        if (a && b) {
+          const holeD = pairFragmentsIntersectPathD(raw1, raw2);
+          const mul = `<g style="mix-blend-mode:multiply">\n${raw1}${raw2}</g>`;
+          const holePath = holeD
+            ? `\n  <path fill="${escapeXmlAttr(bgHex)}" d="${escapeXmlAttr(holeD)}"/>`
+            : '';
+          stackParts.push(`<g data-layout-pair-cutout="1">\n${mul}${holePath}\n</g>`);
+        } else if (a) {
+          stackParts.push(`<g data-layout-pair-cutout="1">\n<g>\n${raw1}\n</g>\n</g>`);
+        } else {
+          stackParts.push(`<g data-layout-pair-cutout="1">\n<g style="mix-blend-mode:multiply">\n${raw2}\n</g>\n</g>`);
+        }
       }
+      const b1e = exp1 ? base1 : '';
+      const b2e = exp2 ? base2 : '';
       const layoutSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
-${layoutSvgLayersInner(base1, base2)}
+${layoutSvgLayersInner(b1e, b2e)}
 ${stackParts.join('\n')}
 </svg>`;
       return {
@@ -2204,12 +2278,14 @@ ${stackParts.join('\n')}
   );
   const exportCrop = layoutExportCropBox(contentBounds);
 
-  const layoutSvg = layoutSvgStringNormal(layer1Paths, layer2Paths, bgHex, null);
+  const out1 = exp1 ? layer1Paths : '';
+  const out2 = exp2 ? layer2Paths : '';
+  const layoutSvg = layoutSvgStringNormal(out1, out2, bgHex, null);
   let layoutSvgExport = layoutSvg;
   let layoutExportW = CANVAS_W;
   let layoutExportH = CANVAS_H;
   if (exportCrop) {
-    layoutSvgExport = layoutSvgStringNormal(layer1Paths, layer2Paths, bgHex, exportCrop);
+    layoutSvgExport = layoutSvgStringNormal(out1, out2, bgHex, exportCrop);
     layoutExportW = exportCrop.vw;
     layoutExportH = exportCrop.vh;
   }
@@ -2281,19 +2357,19 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
       .join('');
     return `  <g clip-path="url(#${clipId})">${inner}</g>\n`;
   }
-  if (layer1Visible && glyphTop1) {
+  if (layer1ExportVisible(state) && glyphTop1) {
     const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyphTop1.pivotX},${-glyphTop1.pivotYCenter})`;
     layer1Paths += posterGlyphToClippedGroup(glyphTop1, c1, trBase, clipTop, state.shapeOmitPosterSub1, 'l1t');
   }
-  if (layer1Visible && glyphBot1) {
+  if (layer1ExportVisible(state) && glyphBot1) {
     const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyphBot1.pivotX},${-glyphBot1.pivotYCenter})`;
     layer1Paths += posterGlyphToClippedGroup(glyphBot1, c1, trBase, clipBot, state.shapeOmitPosterSub1, 'l1b');
   }
-  if (layer2Visible && glyphTop2) {
+  if (layer2ExportVisible(state) && glyphTop2) {
     const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyphTop2.pivotX},${-glyphTop2.pivotYCenter})`;
     layer2Paths += posterGlyphToClippedGroup(glyphTop2, c2, trBase, clipTop, state.shapeOmitPosterSub2, 'l2t');
   }
-  if (layer2Visible && glyphBot2) {
+  if (layer2ExportVisible(state) && glyphBot2) {
     const trBase = `translate(${centerX},${centerY}) scale(${fitScale}) scale(1,-1) translate(${-glyphBot2.pivotX},${-glyphBot2.pivotYCenter})`;
     layer2Paths += posterGlyphToClippedGroup(glyphBot2, c2, trBase, clipBot, state.shapeOmitPosterSub2, 'l2b');
   }
@@ -2621,6 +2697,8 @@ export function initLayout(containerId) {
         exportCellHeight: geomDefaultExport.cellHeight,
         layer1Visible: true,
         layer2Visible: true,
+        layer1PreviewVisible: true,
+        layer2PreviewVisible: true,
         layoutGlyphAnchor: 'bottom',
         randomizeStyling: false,
         extremeStyling: false,
@@ -2646,7 +2724,7 @@ export function initLayout(containerId) {
 
       const getPosterInputs = () => ({
         letter: document.getElementById('poster-letter')?.value || 'F',
-        number: '',
+        number: document.getElementById('poster-number')?.value?.trim() || '',
         featureKey: document.getElementById('poster-feature')?.value || 'normal'
       });
 
@@ -2683,12 +2761,7 @@ export function initLayout(containerId) {
         krok1ConfirmedForSvg = true;
         syncLayoutGeometry(state);
         displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { canvasBg: state.canvasBg, state });
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            scaleLayoutToFit(container);
-            scalePosterToFit(document.getElementById('poster-canvas'));
-          });
-        });
+        scheduleLayoutAndPosterFit(container);
         updateLayoutFooter(state, stageIndices1, stageIndices2);
         syncExportButtons();
         return shapes;
@@ -2707,24 +2780,46 @@ export function initLayout(containerId) {
           else if (state.orientationAxesMode) state.axesPool = generateRandomAxes();
           else state.axesPool = generateRandomAxes();
         }
+        const finishPaint = () => {
+          const pi = getPosterInputs();
+          renderPoster(state, stageIndices1, stageIndices2, pi.letter, pi.number, pi.featureKey);
+          updateLayoutFooter(state, stageIndices1, stageIndices2);
+          syncCanvasChromeBg(state);
+          if (updateLayer1Swatch) updateLayer1Swatch();
+          if (updateLayer2Swatch) updateLayer2Swatch();
+          if (updateCanvasBgSwatch) updateCanvasBgSwatch();
+          const layerVis1 = document.getElementById('layout-layer-visible-1');
+          const layerVis2 = document.getElementById('layout-layer-visible-2');
+          if (layerVis1) layerVis1.checked = state.layer1PreviewVisible !== false;
+          if (layerVis2) layerVis2.checked = state.layer2PreviewVisible !== false;
+          syncTextureBlur(state);
+          syncTextureRadial(state);
+        };
+        if (convertedShapes && krok1ConfirmedForSvg) {
+          convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs)
+            .then((shapes) => {
+              if (!shapes) {
+                renderLayout(state, stageIndices1, stageIndices2);
+                finishPaint();
+                return;
+              }
+              convertedShapes = shapes;
+              displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, {
+                canvasBg: state.canvasBg,
+                state
+              });
+              scheduleLayoutAndPosterFit(container);
+              finishPaint();
+            })
+            .catch((e) => {
+              console.error('Vector refresh failed:', e);
+              renderLayout(state, stageIndices1, stageIndices2);
+              finishPaint();
+            });
+          return;
+        }
         renderLayout(state, stageIndices1, stageIndices2);
-        const pi = getPosterInputs();
-        renderPoster(state, stageIndices1, stageIndices2, pi.letter, pi.number, pi.featureKey);
-        updateLayoutFooter(state, stageIndices1, stageIndices2);
-        syncCanvasChromeBg(state);
-        if (updateLayer1Swatch) updateLayer1Swatch();
-        if (updateLayer2Swatch) updateLayer2Swatch();
-        if (updateCanvasBgSwatch) updateCanvasBgSwatch();
-        const blurRangeEl = document.getElementById('layout-texture-blur-amount');
-        const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
-        if (blurRangeEl) blurRangeEl.value = String(state.textureBlurPx ?? 0);
-        if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx ?? 0} px`;
-        const radialRangeEl = document.getElementById('layout-texture-radial-amount');
-        const radialLabelEl = document.getElementById('layout-texture-radial-amount-label');
-        if (radialRangeEl) radialRangeEl.value = String(state.textureRadialAmount ?? 0);
-        if (radialLabelEl) radialLabelEl.textContent = `Radiální přechod: ${state.textureRadialAmount ?? 0}`;
-        syncTextureBlur(state);
-        syncTextureRadial(state);
+        finishPaint();
       };
 
       const reRender = () => {
@@ -2756,10 +2851,7 @@ export function initLayout(containerId) {
                 canvasBg: state.canvasBg,
                 state
               });
-              requestAnimationFrame(() => {
-                scaleLayoutToFit(container);
-                scalePosterToFit(document.getElementById('poster-canvas'));
-              });
+              scheduleLayoutAndPosterFit(container);
             }
           })
           .catch((e) => console.error('Sync vector view after poster change failed:', e));
@@ -2959,15 +3051,35 @@ export function initLayout(containerId) {
         }
       });
 
-      document.getElementById('layout-btn-png-logo')?.addEventListener('click', () => saveLayoutPng(convertedShapes, state.canvasBg));
-      document.getElementById('layout-btn-png-plakat')?.addEventListener('click', () => savePosterPng(convertedShapes, state.canvasBg));
-      document.getElementById('layout-btn-svg-logo')?.addEventListener('click', () => {
-        if (!convertedShapes || !krok1ConfirmedForSvg) return;
-        saveLayoutSvg(convertedShapes);
+      document.getElementById('layout-btn-png-logo')?.addEventListener('click', async () => {
+        let shapes = convertedShapes;
+        if (shapes && krok1ConfirmedForSvg) {
+          const s = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+          if (s) shapes = s;
+        }
+        saveLayoutPng(shapes, state.canvasBg);
       });
-      document.getElementById('layout-btn-svg-plakat')?.addEventListener('click', () => {
+      document.getElementById('layout-btn-png-plakat')?.addEventListener('click', async () => {
+        let shapes = convertedShapes;
+        if (shapes && krok1ConfirmedForSvg) {
+          const s = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+          if (s) shapes = s;
+        }
+        savePosterPng(shapes, state.canvasBg);
+      });
+      document.getElementById('layout-btn-svg-logo')?.addEventListener('click', async () => {
         if (!convertedShapes || !krok1ConfirmedForSvg) return;
-        savePosterSvg(convertedShapes);
+        let shapes = convertedShapes;
+        const s = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+        if (s) shapes = s;
+        saveLayoutSvg(shapes);
+      });
+      document.getElementById('layout-btn-svg-plakat')?.addEventListener('click', async () => {
+        if (!convertedShapes || !krok1ConfirmedForSvg) return;
+        let shapes = convertedShapes;
+        const s = await convertToShapes(state, stageIndices1, stageIndices2, getPosterInputs);
+        if (s) shapes = s;
+        savePosterSvg(shapes);
       });
       document.getElementById('layout-btn-unify')?.addEventListener('click', () => updateMode('unify'));
       document.getElementById('layout-btn-symmetrical')?.addEventListener('click', () => updateMode('symmetrical'));
@@ -2991,6 +3103,15 @@ export function initLayout(containerId) {
       document.getElementById('layout-btn-layer2')?.addEventListener('click', () => {
         state.layer2Visible = !state.layer2Visible;
         reRender();
+      });
+
+      document.getElementById('layout-layer-visible-1')?.addEventListener('change', (e) => {
+        state.layer1PreviewVisible = e.target.checked;
+        paintView();
+      });
+      document.getElementById('layout-layer-visible-2')?.addEventListener('change', (e) => {
+        state.layer2PreviewVisible = e.target.checked;
+        paintView();
       });
 
       document.getElementById('layout-btn-random-omit-shapes')?.addEventListener('click', async () => {
@@ -3048,12 +3169,7 @@ export function initLayout(containerId) {
               const ptc = shapes.layoutSvg.match(/<path\b/g)?.length ?? 0;
               console.info(`[Omit tvary] ${pickMeta.picksStr} · <path> layout: ${ptc} · výřez překryvů: ${layoutViewUsesCutoutChrome(state) ? 'ano' : 'ne'}`);
             }
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                scaleLayoutToFit(container);
-                scalePosterToFit(document.getElementById('poster-canvas'));
-              });
-            });
+            scheduleLayoutAndPosterFit(container);
           } else {
             console.warn('[Omit tvary] convertToShapes → null. ?layoutDebug=1 pro tabulku.');
             layoutDtable([
@@ -3099,12 +3215,7 @@ export function initLayout(containerId) {
           if (shapes) {
             convertedShapes = shapes;
             displayShapesAsSvg(shapes.layoutSvg, shapes.posterSvg, container, { canvasBg: state.canvasBg, state });
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                scaleLayoutToFit(container);
-                scalePosterToFit(document.getElementById('poster-canvas'));
-              });
-            });
+            scheduleLayoutAndPosterFit(container);
           }
         } catch (e) {
           console.error('Pair cutout (all cells) failed:', e);
@@ -3131,12 +3242,7 @@ export function initLayout(containerId) {
               canvasBg: state.canvasBg,
               state
             });
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                scaleLayoutToFit(container);
-                scalePosterToFit(document.getElementById('poster-canvas'));
-              });
-            });
+            scheduleLayoutAndPosterFit(container);
           }
         } catch (e) {
           console.error('Obnovit tvary failed:', e);
@@ -3174,12 +3280,7 @@ export function initLayout(containerId) {
               canvasBg: state.canvasBg,
               state
             });
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                scaleLayoutToFit(container);
-                scalePosterToFit(document.getElementById('poster-canvas'));
-              });
-            });
+            scheduleLayoutAndPosterFit(container);
           }
         } catch (e) {
           console.error('Random scale shapes failed:', e);
@@ -3205,12 +3306,7 @@ export function initLayout(containerId) {
               canvasBg: state.canvasBg,
               state
             });
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                scaleLayoutToFit(container);
-                scalePosterToFit(document.getElementById('poster-canvas'));
-              });
-            });
+            scheduleLayoutAndPosterFit(container);
           }
         } catch (e) {
           console.error('Obnovit měřítko failed:', e);
@@ -3402,10 +3498,7 @@ export function initLayout(containerId) {
       });
 
       const resizeHandler = () => {
-        requestAnimationFrame(() => {
-          scaleLayoutToFit(container);
-          scalePosterToFit(document.getElementById('poster-canvas'));
-        });
+        scheduleLayoutAndPosterFit(container);
       };
       window.addEventListener('resize', resizeHandler);
       const layoutMql = window.matchMedia(LAYOUT_MEDIA_QUERY);
@@ -3413,6 +3506,12 @@ export function initLayout(containerId) {
         layoutMql.addEventListener('change', resizeHandler);
       } else {
         layoutMql.addListener(resizeHandler);
+      }
+      if (typeof ResizeObserver !== 'undefined') {
+        const layoutCanvasResize = new ResizeObserver(() => {
+          scheduleLayoutAndPosterFit(container);
+        });
+        layoutCanvasResize.observe(container);
       }
       resizeHandler();
 
@@ -3422,68 +3521,6 @@ export function initLayout(containerId) {
       document.getElementById('poster-number')?.addEventListener('change', onPosterFieldsChanged);
       document.getElementById('poster-feature')?.addEventListener('input', onPosterFieldsChanged);
       document.getElementById('poster-feature')?.addEventListener('change', onPosterFieldsChanged);
-
-      document.getElementById('layout-texture-blur-amount')?.addEventListener('input', (e) => {
-        state.textureBlurPx = Number(e.target.value) || 0;
-        const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
-        if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx} px`;
-        syncTextureBlur(state);
-      });
-
-      document.getElementById('layout-texture-blur-random-layer')?.addEventListener('click', () => {
-        const v1 = state.layer1Visible;
-        const v2 = state.layer2Visible;
-        if (v1 && v2) state.textureBlurMode = Math.random() < 0.5 ? 'layer1' : 'layer2';
-        else if (v1) state.textureBlurMode = 'layer1';
-        else if (v2) state.textureBlurMode = 'layer2';
-        else state.textureBlurMode = 'both';
-        const blurRangeEl = document.getElementById('layout-texture-blur-amount');
-        const max = Number(blurRangeEl?.max) || 16;
-        const min = Number(blurRangeEl?.min) || 0;
-        const step = Number(blurRangeEl?.step) || 1;
-        const steps = Math.floor((max - min) / step) + 1;
-        state.textureBlurPx = min + Math.floor(Math.random() * steps) * step;
-        if (blurRangeEl) blurRangeEl.value = String(state.textureBlurPx);
-        const blurLabelEl = document.getElementById('layout-texture-blur-amount-label');
-        if (blurLabelEl) blurLabelEl.textContent = `Rozostření: ${state.textureBlurPx} px`;
-        syncTextureBlur(state);
-      });
-
-      document.getElementById('layout-texture-blur-all')?.addEventListener('click', () => {
-        state.textureBlurMode = 'both';
-        syncTextureBlur(state);
-      });
-
-      document.getElementById('layout-texture-radial-amount')?.addEventListener('input', (e) => {
-        state.textureRadialAmount = Number(e.target.value) || 0;
-        const radialLabelEl = document.getElementById('layout-texture-radial-amount-label');
-        if (radialLabelEl) radialLabelEl.textContent = `Radiální přechod: ${state.textureRadialAmount}`;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-radial-random-layer')?.addEventListener('click', () => {
-        const v1 = state.layer1Visible;
-        const v2 = state.layer2Visible;
-        if (v1 && v2) state.textureRadialMode = Math.random() < 0.5 ? 'layer1' : 'layer2';
-        else if (v1) state.textureRadialMode = 'layer1';
-        else if (v2) state.textureRadialMode = 'layer2';
-        else state.textureRadialMode = 'both';
-        const radialRangeEl = document.getElementById('layout-texture-radial-amount');
-        const max = Number(radialRangeEl?.max) || 16;
-        const min = Number(radialRangeEl?.min) || 0;
-        const step = Number(radialRangeEl?.step) || 1;
-        const steps = Math.floor((max - min) / step) + 1;
-        state.textureRadialAmount = min + Math.floor(Math.random() * steps) * step;
-        if (radialRangeEl) radialRangeEl.value = String(state.textureRadialAmount);
-        const radialLabelEl = document.getElementById('layout-texture-radial-amount-label');
-        if (radialLabelEl) radialLabelEl.textContent = `Radiální přechod: ${state.textureRadialAmount}`;
-        syncTextureRadial(state);
-      });
-
-      document.getElementById('layout-texture-radial-all')?.addEventListener('click', () => {
-        state.textureRadialMode = 'both';
-        syncTextureRadial(state);
-      });
     })
     .catch((err) => {
       console.error('Failed to load layout:', err);

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Datatype:wght@100..900&display=swap" rel="stylesheet">
+  <title>Zvukové vlny – kruh</title>
+  <link rel="stylesheet" href="/src/style.scss">
+</head>
+<body class="app-page sound-waves-page">
+  <div class="layout-workspace">
+    <aside class="layout-sidebar" aria-label="Nabídka a nástroje">
+      <div class="layout-sidebar-col layout-sidebar-col--pages">
+        <nav class="layout-page-list">
+          <ul>
+            <li><a href="index.html">Rozložení loga</a></li>
+            <li><a href="filhramonie.html">FilHRAmonie</a></li>
+            <li><a href="testing.html">Testování</a></li>
+            <li><a href="forum.html">Forum</a></li>
+            <li><a href="sound-waves.html" aria-current="page">Zvukové vlny</a></li>
+          </ul>
+        </nav>
+        <div class="layout-sidebar-fill"></div>
+        <div class="layout-sidebar-sep"></div>
+        <p class="sound-waves-hint">Reaguje na zvuk — velikost pixelů kolísá ve vlnách, jas z frekvencí od středu ven.</p>
+        <p id="sound-waves-mode" class="sound-waves-mode">Vlnky pixelů</p>
+        <p class="layout-footer-buttons">
+          <button type="button" id="sound-waves-start">Spustit mikrofon</button>
+        </p>
+        <p id="sound-waves-status" class="sound-waves-status"></p>
+      </div>
+      <div class="layout-sidebar-col layout-sidebar-col--tools sound-waves-tools">
+        <div class="sound-waves-controls">
+          <label class="sound-waves-label"><span id="sound-waves-sens-lbl"></span> <input type="range" id="sound-waves-sens" min="30" max="250" value="100" /></label>
+          <label class="sound-waves-label"><span id="sound-waves-pulse-lbl"></span> <input type="range" id="sound-waves-pulse" min="0" max="100" value="38" /></label>
+          <label class="sound-waves-label"><span id="sound-waves-inner-lbl"></span> <input type="range" id="sound-waves-inner" min="4" max="26" value="10" /></label>
+          <label class="sound-waves-label"><span id="sound-waves-dense-lbl"></span> <input type="range" id="sound-waves-dense" min="50" max="200" value="100" /></label>
+        </div>
+        <div class="layout-sidebar-fill"></div>
+      </div>
+    </aside>
+    <main>
+      <div id="sound-waves-canvas"></div>
+    </main>
+  </div>
+  <script type="module" src="/src/sound-waves.js"></script>
+</body>
+</html>
