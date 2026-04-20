@@ -4,6 +4,10 @@ const CANVAS_W = Math.round(1080 * 297 / 210);
 const CANVAS_H = 1080;
 const POSTER_W = 595;
 const POSTER_H = 842;
+const A1_PORTRAIT_W_MM = 594;
+const A1_PORTRAIT_H_MM = 841;
+const A1_LANDSCAPE_W_MM = A1_PORTRAIT_H_MM;
+const A1_LANDSCAPE_H_MM = A1_PORTRAIT_W_MM;
 const A3_PRINT_DPI = 300;
 function mmToPrintPx(mm) {
   return Math.round((mm / 25.4) * A3_PRINT_DPI);
@@ -16,6 +20,7 @@ const TEXTURE_BITMAP_UPLOAD_MAX_BYTES = 512 * 1024;
 const SVG_EMBED_TEXTURE_MAX_EDGE_PX = 1024;
 const SVG_EMBED_JPEG_QUALITY = 0.82;
 const SVG_EMBED_DATAURL_SKIP_REOPT_BYTES = 600_000;
+const SVG_EMBED_TARGET_DPI = 300;
 const LAYOUT_MEDIA_MAX_WIDTH = 1440;
 const LAYOUT_MEDIA_QUERY = `(max-width: ${LAYOUT_MEDIA_MAX_WIDTH}px)`;
 const LAYOUT_MARGIN = 48;
@@ -1294,11 +1299,11 @@ function canvasHasNonOpaqueAlpha(ctx, w, h) {
   return false;
 }
 
-function imageElementToOptimizedSvgDataUrl(img, mimeHint) {
+function imageElementToOptimizedSvgDataUrl(img, mimeHint, maxEdgePx = SVG_EMBED_TEXTURE_MAX_EDGE_PX) {
   const sw = img.naturalWidth || img.width;
   const sh = img.naturalHeight || img.height;
   if (!sw || !sh) throw new Error('svg embed size');
-  const maxE = SVG_EMBED_TEXTURE_MAX_EDGE_PX;
+  const maxE = Math.max(64, Number(maxEdgePx) || SVG_EMBED_TEXTURE_MAX_EDGE_PX);
   const scale = Math.min(1, maxE / Math.max(sw, sh));
   const dw = Math.max(1, Math.round(sw * scale));
   const dh = Math.max(1, Math.round(sh * scale));
@@ -1318,25 +1323,65 @@ function imageElementToOptimizedSvgDataUrl(img, mimeHint) {
   return canvas.toDataURL('image/jpeg', SVG_EMBED_JPEG_QUALITY);
 }
 
-async function blobToOptimizedSvgEmbedDataUrl(blob) {
+async function blobToOptimizedSvgEmbedDataUrl(blob, maxEdgePx) {
   const o = URL.createObjectURL(blob);
   try {
     const img = await loadImageElement(o);
-    return imageElementToOptimizedSvgDataUrl(img, blob.type);
+    return imageElementToOptimizedSvgDataUrl(img, blob.type, maxEdgePx);
   } finally {
     URL.revokeObjectURL(o);
   }
 }
 
-async function resolveImageUrlForSvgExport(url) {
+function parseSvgMmDim(attr) {
+  const s = String(attr || '').trim().toLowerCase();
+  const m = s.match(/^([0-9]+(?:\.[0-9]+)?)\s*mm$/);
+  return m ? Number(m[1]) : null;
+}
+
+function parseSvgNum(attr) {
+  const s = String(attr || '').trim();
+  if (!s) return null;
+  const v = Number(s);
+  return Number.isFinite(v) ? v : null;
+}
+
+function computeSvgMmPerUserUnit(svgRoot) {
+  const wmm = parseSvgMmDim(svgRoot.getAttribute('width'));
+  const hmm = parseSvgMmDim(svgRoot.getAttribute('height'));
+  const vb = String(svgRoot.getAttribute('viewBox') || '').trim().split(/\s+/).map(Number);
+  if (!wmm || !hmm || vb.length !== 4 || vb.some((x) => !Number.isFinite(x))) return null;
+  const vbw = vb[2];
+  const vbh = vb[3];
+  if (vbw <= 0 || vbh <= 0) return null;
+  return { x: wmm / vbw, y: hmm / vbh };
+}
+
+function computeTargetEmbedMaxEdgePx(svgRoot, imageEl) {
+  const mmPer = computeSvgMmPerUserUnit(svgRoot);
+  if (!mmPer) return null;
+  const wUnits = parseSvgNum(imageEl.getAttribute('width'));
+  const hUnits = parseSvgNum(imageEl.getAttribute('height'));
+  if (!wUnits || !hUnits) return null;
+  if (wUnits <= 1.01 && hUnits <= 1.01) return null;
+  const physWmm = wUnits * mmPer.x;
+  const physHmm = hUnits * mmPer.y;
+  const pxW = Math.round((physWmm / 25.4) * SVG_EMBED_TARGET_DPI);
+  const pxH = Math.round((physHmm / 25.4) * SVG_EMBED_TARGET_DPI);
+  const want = Math.max(pxW, pxH);
+  return Math.max(256, Math.min(4096, want));
+}
+
+async function resolveImageUrlForSvgExport(url, opts = {}) {
   const u = String(url || '').trim();
   if (!u) return '';
+  const maxEdgePx = opts.maxEdgePx;
   if (u.startsWith('data:')) {
     if (u.length <= SVG_EMBED_DATAURL_SKIP_REOPT_BYTES) return u;
     try {
       const res = await fetch(u);
       const blob = await res.blob();
-      return await blobToOptimizedSvgEmbedDataUrl(blob);
+      return await blobToOptimizedSvgEmbedDataUrl(blob, maxEdgePx);
     } catch (e) {
       console.warn('[SVG export] data URL:', e);
       return u;
@@ -1346,11 +1391,11 @@ async function resolveImageUrlForSvgExport(url) {
     const res = await fetch(u);
     if (!res.ok) throw new Error(String(res.status));
     const blob = await res.blob();
-    return await blobToOptimizedSvgEmbedDataUrl(blob);
+    return await blobToOptimizedSvgEmbedDataUrl(blob, maxEdgePx);
   } catch (e) {
     try {
       const img = await loadImageElement(u);
-      return imageElementToOptimizedSvgDataUrl(img, '');
+      return imageElementToOptimizedSvgDataUrl(img, '', maxEdgePx);
     } catch (e2) {
       console.warn('[SVG export] Nepodařilo se vložit obrázek:', e, e2);
       return u;
@@ -1364,10 +1409,12 @@ async function embedSvgImageHrefsAsDataUrls(svgRoot) {
   for (const el of images) {
     const href = el.getAttribute('href') || el.getAttributeNS(XLINK_NS, 'href');
     if (!href) continue;
-    let data = cache.get(href);
+    const maxEdgePx = computeTargetEmbedMaxEdgePx(svgRoot, el) || undefined;
+    const cacheKey = `${href}|${maxEdgePx || ''}`;
+    let data = cache.get(cacheKey);
     if (data === undefined) {
-      data = await resolveImageUrlForSvgExport(href);
-      cache.set(href, data);
+      data = await resolveImageUrlForSvgExport(href, { maxEdgePx });
+      cache.set(cacheKey, data);
     }
     if (data && String(data).startsWith('data:')) {
       el.setAttribute('href', data);
@@ -2459,7 +2506,7 @@ function layoutSvgStringNormal(layer1Paths, layer2Paths, bgHex, crop) {
   const vw = crop ? crop.vw : CANVAS_W;
   const vh = crop ? crop.vh : CANVAS_H;
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${vw}" height="${vh}" viewBox="${vx} ${vy} ${vw} ${vh}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<svg width="${A1_LANDSCAPE_W_MM}mm" height="${A1_LANDSCAPE_H_MM}mm" viewBox="${vx} ${vy} ${vw} ${vh}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 ${layoutSvgLayersInner(layer1Paths, layer2Paths)}
 </svg>`;
@@ -3747,7 +3794,7 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
       const b1e = exp1 ? base1 : '';
       const b2e = exp2 ? base2 : '';
       const layoutSvg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<svg width="${A1_LANDSCAPE_W_MM}mm" height="${A1_LANDSCAPE_H_MM}mm" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 ${layoutSvgLayersInner(b1e, b2e)}
 ${stackParts.join('\n')}
@@ -3853,7 +3900,7 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
       ? `  <path fill="${escapeXmlAttr(bgHex)}" d="${escapeXmlAttr(holeD)}"/>\n`
       : '';
     return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<svg width="${A1_PORTRAIT_W_MM}mm" height="${A1_PORTRAIT_H_MM}mm" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 <g data-poster-pair-cutout="1">
 <g id="layer1">\n${layer1Paths}</g>
@@ -3862,7 +3909,7 @@ ${holePath}</g>
 </svg>`;
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<svg width="${A1_PORTRAIT_W_MM}mm" height="${A1_PORTRAIT_H_MM}mm" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 <g id="layer1">\n${layer1Paths}</g>
 <g id="layer2" style="mix-blend-mode:multiply">\n${layer2Paths}</g>

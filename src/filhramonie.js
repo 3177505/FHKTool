@@ -4,6 +4,10 @@ const CANVAS_W = Math.round(1080 * 297 / 210);
 const CANVAS_H = 1080;
 const POSTER_W = 595;
 const POSTER_H = 842;
+const A1_PORTRAIT_W_MM = 594;
+const A1_PORTRAIT_H_MM = 841;
+const A1_LANDSCAPE_W_MM = A1_PORTRAIT_H_MM;
+const A1_LANDSCAPE_H_MM = A1_PORTRAIT_W_MM;
 const A3_PRINT_DPI = 300;
 function mmToPrintPx(mm) {
   return Math.round((mm / 25.4) * A3_PRINT_DPI);
@@ -1132,7 +1136,7 @@ function layoutSvgStringNormal(layer1Paths, layer2Paths, bgHex, crop) {
   const vw = crop ? crop.vw : CANVAS_W;
   const vh = crop ? crop.vh : CANVAS_H;
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${vw}" height="${vh}" viewBox="${vx} ${vy} ${vw} ${vh}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<svg width="${A1_LANDSCAPE_W_MM}mm" height="${A1_LANDSCAPE_H_MM}mm" viewBox="${vx} ${vy} ${vw} ${vh}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 ${layoutSvgLayersInner(layer1Paths, layer2Paths)}
 </svg>`;
@@ -2248,7 +2252,7 @@ function convertLayoutToShapes(font1, font2, state, stageIndices1, stageIndices2
       const b1e = exp1 ? base1 : '';
       const b2e = exp2 ? base2 : '';
       const layoutSvg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${CANVAS_W}" height="${CANVAS_H}" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<svg width="${A1_LANDSCAPE_W_MM}mm" height="${A1_LANDSCAPE_H_MM}mm" viewBox="0 0 ${CANVAS_W} ${CANVAS_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 ${layoutSvgLayersInner(b1e, b2e)}
 ${stackParts.join('\n')}
@@ -2381,7 +2385,7 @@ function convertPosterToShapes(font1, font2, state, stageIndices1, stageIndices2
       ? `  <path fill="${escapeXmlAttr(bgHex)}" d="${escapeXmlAttr(holeD)}"/>\n`
       : '';
     return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<svg width="${A1_PORTRAIT_W_MM}mm" height="${A1_PORTRAIT_H_MM}mm" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 <defs>
 ${clipDefs}</defs>
@@ -2392,7 +2396,7 @@ ${holePath}</g>
 </svg>`;
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${POSTER_W}" height="${POSTER_H}" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+<svg width="${A1_PORTRAIT_W_MM}mm" height="${A1_PORTRAIT_H_MM}mm" viewBox="0 0 ${POSTER_W} ${POSTER_H}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 <rect width="100%" height="100%" fill="${bgHex}"/>
 <defs>
 ${clipDefs}</defs>
