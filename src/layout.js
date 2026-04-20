@@ -703,6 +703,7 @@ function texturePatternOptsForLayer(state, layerNum) {
         return Number.isFinite(x) ? Math.min(0.92, Math.max(0.08, x)) : 0.45;
       })(),
       bitmapUrl: state.texturePatternBitmapUrl1 || '',
+      bitmapSvgText: state.texturePatternBitmapSvgText1 || '',
       bitmapScale: Number(state.texturePatternBitmapScale1) || 100,
       bitmapPerShape: !!state.texturePatternBitmapPerShape1
     };
@@ -717,6 +718,7 @@ function texturePatternOptsForLayer(state, layerNum) {
       return Number.isFinite(x) ? Math.min(0.92, Math.max(0.08, x)) : 0.45;
     })(),
     bitmapUrl: state.texturePatternBitmapUrl2 || '',
+    bitmapSvgText: state.texturePatternBitmapSvgText2 || '',
     bitmapScale: Number(state.texturePatternBitmapScale2) || 100,
     bitmapPerShape: !!state.texturePatternBitmapPerShape2
   };
@@ -731,8 +733,37 @@ function textureGradientActiveForLayer(state, layerNum) {
 function layerPatternShouldApply(state, layerNum) {
   const pat = texturePatternOptsForLayer(state, layerNum);
   if (!pat.enabled) return false;
-  if (pat.kind === 'bitmap') return !!pat.bitmapUrl;
+  if (pat.kind === 'bitmap') return !!(pat.bitmapUrl || pat.bitmapSvgText);
   if (pat.kind === 'dothatch') return true;
+  return true;
+}
+
+function importSvgTextureIntoPattern(doc, p, svgText, w, h, bboxMode) {
+  const parser = new DOMParser();
+  const sdoc = parser.parseFromString(String(svgText || ''), 'image/svg+xml');
+  const root = sdoc.documentElement;
+  if (!root || root.localName !== 'svg') return false;
+  const vb = String(root.getAttribute('viewBox') || '').trim().split(/\s+/).map(Number);
+  const vbOk = vb.length === 4 && vb.every((n) => Number.isFinite(n)) && vb[2] > 0 && vb[3] > 0;
+  const vx = vbOk ? vb[0] : 0;
+  const vy = vbOk ? vb[1] : 0;
+  const vbw = vbOk ? vb[2] : (Number(root.getAttribute('width')) || w || 1);
+  const vbh = vbOk ? vb[3] : (Number(root.getAttribute('height')) || h || 1);
+  if (!vbw || !vbh) return false;
+
+  const g = doc.createElementNS(SVG_NS, 'g');
+  if (bboxMode) {
+    g.setAttribute('transform', `translate(${-vx / vbw},${-vy / vbh}) scale(${1 / vbw},${1 / vbh})`);
+  } else {
+    g.setAttribute('transform', `translate(${-vx},${-vy}) scale(${w / vbw},${h / vbh})`);
+  }
+
+  for (const n of Array.from(root.childNodes)) {
+    if (n.nodeType === 1 && n.localName === 'title') continue;
+    if (n.nodeType === 1 && n.localName === 'desc') continue;
+    g.appendChild(doc.importNode(n, true));
+  }
+  p.appendChild(g);
   return true;
 }
 
@@ -894,15 +925,19 @@ function applyBitmapPatternToSvgPaths(defs, paths, pat) {
       p.setAttribute('height', '1');
       p.setAttribute('patternTransform', 'translate(0,1) scale(1,-1)');
       p.setAttribute('data-texfill', '1');
-      const img = doc.createElementNS(SVG_NS, 'image');
-      img.setAttribute('href', pat.bitmapUrl);
-      img.setAttributeNS(XLINK_NS, 'xlink:href', pat.bitmapUrl);
-      img.setAttribute('x', String(io));
-      img.setAttribute('y', String(io));
-      img.setAttribute('width', String(iw));
-      img.setAttribute('height', String(iw));
-      img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
-      p.appendChild(img);
+      if (pat.bitmapSvgText) {
+        importSvgTextureIntoPattern(doc, p, pat.bitmapSvgText, 1, 1, true);
+      } else {
+        const img = doc.createElementNS(SVG_NS, 'image');
+        img.setAttribute('href', pat.bitmapUrl);
+        img.setAttributeNS(XLINK_NS, 'xlink:href', pat.bitmapUrl);
+        img.setAttribute('x', String(io));
+        img.setAttribute('y', String(io));
+        img.setAttribute('width', String(iw));
+        img.setAttribute('height', String(iw));
+        img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+        p.appendChild(img);
+      }
       defs.appendChild(p);
       path.setAttribute('fill', `url(#${patId})`);
     });
@@ -916,13 +951,17 @@ function applyBitmapPatternToSvgPaths(defs, paths, pat) {
   p.setAttribute('height', String(h));
   p.setAttribute('patternTransform', `translate(0,${h}) scale(1,-1)`);
   p.setAttribute('data-texfill', '1');
-  const img = doc.createElementNS(SVG_NS, 'image');
-  img.setAttribute('href', pat.bitmapUrl);
-  img.setAttributeNS(XLINK_NS, 'xlink:href', pat.bitmapUrl);
-  img.setAttribute('width', String(w));
-  img.setAttribute('height', String(h));
-  img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
-  p.appendChild(img);
+  if (pat.bitmapSvgText) {
+    importSvgTextureIntoPattern(doc, p, pat.bitmapSvgText, w, h, false);
+  } else {
+    const img = doc.createElementNS(SVG_NS, 'image');
+    img.setAttribute('href', pat.bitmapUrl);
+    img.setAttributeNS(XLINK_NS, 'xlink:href', pat.bitmapUrl);
+    img.setAttribute('width', String(w));
+    img.setAttribute('height', String(h));
+    img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+    p.appendChild(img);
+  }
   defs.appendChild(p);
   paths.forEach((path) => {
     const rawFill = path.getAttribute('fill') || '#000000';
@@ -1287,6 +1326,85 @@ function loadImageElement(src) {
   });
 }
 
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+function parseSvgMmDim(attr) {
+  const s = String(attr || '').trim().toLowerCase();
+  const m = s.match(/^([0-9]+(?:\.[0-9]+)?)\s*mm$/);
+  return m ? Number(m[1]) : null;
+}
+
+function parseSvgNum(attr) {
+  const s = String(attr || '').trim();
+  if (!s) return null;
+  const v = Number(s);
+  return Number.isFinite(v) ? v : null;
+}
+
+function computeSvgMmPerUserUnit(svgRoot) {
+  const wmm = parseSvgMmDim(svgRoot.getAttribute('width'));
+  const hmm = parseSvgMmDim(svgRoot.getAttribute('height'));
+  const vb = String(svgRoot.getAttribute('viewBox') || '').trim().split(/\s+/).map(Number);
+  if (!wmm || !hmm || vb.length !== 4 || vb.some((x) => !Number.isFinite(x))) return null;
+  const vbw = vb[2];
+  const vbh = vb[3];
+  if (vbw <= 0 || vbh <= 0) return null;
+  return { x: wmm / vbw, y: hmm / vbh };
+}
+
+function computeTargetEmbedMaxEdgePx(svgRoot, imageEl) {
+  const mmPer = computeSvgMmPerUserUnit(svgRoot);
+  if (!mmPer) return null;
+  const wUnits = parseSvgNum(imageEl.getAttribute('width'));
+  const hUnits = parseSvgNum(imageEl.getAttribute('height'));
+  if (!wUnits || !hUnits) return null;
+  if (wUnits <= 1.01 && hUnits <= 1.01) return null;
+  const physWmm = wUnits * mmPer.x;
+  const physHmm = hUnits * mmPer.y;
+  const pxW = Math.round((physWmm / 25.4) * SVG_EMBED_TARGET_DPI);
+  const pxH = Math.round((physHmm / 25.4) * SVG_EMBED_TARGET_DPI);
+  const want = Math.max(pxW, pxH);
+  return Math.max(256, Math.min(6000, want));
+}
+
+function canvasToDataUrlForMime(canvas, mime, quality) {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('jpeg') || m.includes('jpg')) return canvas.toDataURL('image/jpeg', quality ?? 0.92);
+  if (m.includes('webp')) return canvas.toDataURL('image/webp', quality ?? 0.92);
+  return canvas.toDataURL('image/png');
+}
+
+async function blobToDataUrlDownscaleIfNeeded(blob, maxEdgePx) {
+  const cap = Number(maxEdgePx);
+  if (!Number.isFinite(cap) || cap <= 0) return await blobToDataUrl(blob);
+  const o = URL.createObjectURL(blob);
+  try {
+    const img = await loadImageElement(o);
+    const sw = img.naturalWidth || img.width;
+    const sh = img.naturalHeight || img.height;
+    if (!sw || !sh) return await blobToDataUrl(blob);
+    const scale = Math.min(1, cap / Math.max(sw, sh));
+    if (scale >= 0.999) return await blobToDataUrl(blob);
+    const dw = Math.max(1, Math.round(sw * scale));
+    const dh = Math.max(1, Math.round(sh * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = dw;
+    canvas.height = dh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, dw, dh);
+    return canvasToDataUrlForMime(canvas, blob.type, SVG_EMBED_JPEG_QUALITY);
+  } finally {
+    URL.revokeObjectURL(o);
+  }
+}
+
 function canvasHasNonOpaqueAlpha(ctx, w, h) {
   const sx = Math.max(1, Math.ceil(w / 32));
   const sy = Math.max(1, Math.ceil(h / 32));
@@ -1333,69 +1451,42 @@ async function blobToOptimizedSvgEmbedDataUrl(blob, maxEdgePx) {
   }
 }
 
-function parseSvgMmDim(attr) {
-  const s = String(attr || '').trim().toLowerCase();
-  const m = s.match(/^([0-9]+(?:\.[0-9]+)?)\s*mm$/);
-  return m ? Number(m[1]) : null;
-}
-
-function parseSvgNum(attr) {
-  const s = String(attr || '').trim();
-  if (!s) return null;
-  const v = Number(s);
-  return Number.isFinite(v) ? v : null;
-}
-
-function computeSvgMmPerUserUnit(svgRoot) {
-  const wmm = parseSvgMmDim(svgRoot.getAttribute('width'));
-  const hmm = parseSvgMmDim(svgRoot.getAttribute('height'));
-  const vb = String(svgRoot.getAttribute('viewBox') || '').trim().split(/\s+/).map(Number);
-  if (!wmm || !hmm || vb.length !== 4 || vb.some((x) => !Number.isFinite(x))) return null;
-  const vbw = vb[2];
-  const vbh = vb[3];
-  if (vbw <= 0 || vbh <= 0) return null;
-  return { x: wmm / vbw, y: hmm / vbh };
-}
-
-function computeTargetEmbedMaxEdgePx(svgRoot, imageEl) {
-  const mmPer = computeSvgMmPerUserUnit(svgRoot);
-  if (!mmPer) return null;
-  const wUnits = parseSvgNum(imageEl.getAttribute('width'));
-  const hUnits = parseSvgNum(imageEl.getAttribute('height'));
-  if (!wUnits || !hUnits) return null;
-  if (wUnits <= 1.01 && hUnits <= 1.01) return null;
-  const physWmm = wUnits * mmPer.x;
-  const physHmm = hUnits * mmPer.y;
-  const pxW = Math.round((physWmm / 25.4) * SVG_EMBED_TARGET_DPI);
-  const pxH = Math.round((physHmm / 25.4) * SVG_EMBED_TARGET_DPI);
-  const want = Math.max(pxW, pxH);
-  return Math.max(256, Math.min(4096, want));
-}
-
 async function resolveImageUrlForSvgExport(url, opts = {}) {
   const u = String(url || '').trim();
   if (!u) return '';
   const maxEdgePx = opts.maxEdgePx;
   if (u.startsWith('data:')) {
-    if (u.length <= SVG_EMBED_DATAURL_SKIP_REOPT_BYTES) return u;
-    try {
-      const res = await fetch(u);
-      const blob = await res.blob();
-      return await blobToOptimizedSvgEmbedDataUrl(blob, maxEdgePx);
-    } catch (e) {
-      console.warn('[SVG export] data URL:', e);
-      return u;
-    }
+    return u;
   }
   try {
     const res = await fetch(u);
     if (!res.ok) throw new Error(String(res.status));
     const blob = await res.blob();
-    return await blobToOptimizedSvgEmbedDataUrl(blob, maxEdgePx);
+    return await blobToDataUrlDownscaleIfNeeded(blob, maxEdgePx);
   } catch (e) {
     try {
       const img = await loadImageElement(u);
-      return imageElementToOptimizedSvgDataUrl(img, '', maxEdgePx);
+      const sw = img.naturalWidth || img.width;
+      const sh = img.naturalHeight || img.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      if (maxEdgePx && Number.isFinite(maxEdgePx) && maxEdgePx > 0) {
+        const scale = Math.min(1, maxEdgePx / Math.max(sw, sh));
+        if (scale < 0.999) {
+          const dw = Math.max(1, Math.round(sw * scale));
+          const dh = Math.max(1, Math.round(sh * scale));
+          const c2 = document.createElement('canvas');
+          c2.width = dw;
+          c2.height = dh;
+          const ctx2 = c2.getContext('2d');
+          ctx2.drawImage(img, 0, 0, dw, dh);
+          return canvasToDataUrlForMime(c2, '', SVG_EMBED_JPEG_QUALITY);
+        }
+      }
+      return canvas.toDataURL('image/png');
     } catch (e2) {
       console.warn('[SVG export] Nepodařilo se vložit obrázek:', e, e2);
       return u;
@@ -1661,6 +1752,8 @@ function resetNahodneTextureEfekty(state) {
   state.texturePatternBitmapUrl2 = '';
   state.texturePatternBitmapFilename1 = '';
   state.texturePatternBitmapFilename2 = '';
+  state.texturePatternBitmapSvgText1 = '';
+  state.texturePatternBitmapSvgText2 = '';
   state.texturePatternBitmapScale1 = 100;
   state.texturePatternBitmapScale2 = 100;
   state.texturePatternBitmapPerShape1 = false;
@@ -1782,7 +1875,7 @@ function bitmapTextureFileAllowed(file) {
   const t = String(file.type || '').trim().toLowerCase();
   if (t.startsWith('image/')) return true;
   const n = String(file.name || '').toLowerCase();
-  return /\.(png|jpe?g)$/.test(n);
+  return /\.(png|jpe?g|svg)$/.test(n);
 }
 
 function revokeTexturePatternBitmap(state, layerNum) {
@@ -4267,6 +4360,8 @@ export function initLayout(containerId) {
         texturePatternBitmapUrl2: '',
         texturePatternBitmapFilename1: '',
         texturePatternBitmapFilename2: '',
+        texturePatternBitmapSvgText1: '',
+        texturePatternBitmapSvgText2: '',
         texturePatternBitmapScale1: 100,
         texturePatternBitmapScale2: 100,
         texturePatternBitmapPerShape1: false,
@@ -5339,7 +5434,7 @@ export function initLayout(containerId) {
         syncTextureRadial(state);
       });
 
-      document.getElementById('layout-texture-pat-bitmap-file-1')?.addEventListener('change', (e) => {
+      document.getElementById('layout-texture-pat-bitmap-file-1')?.addEventListener('change', async (e) => {
         const f = e.target.files?.[0];
         if (!f) {
           e.target.value = '';
@@ -5347,7 +5442,7 @@ export function initLayout(containerId) {
         }
         if (!bitmapTextureFileAllowed(f)) {
           e.target.value = '';
-          window.alert('Vyberte obrázek PNG nebo JPEG (JPG).');
+          window.alert('Vyberte obrázek PNG, JPEG (JPG), nebo SVG.');
           return;
         }
         if (f.size > TEXTURE_BITMAP_UPLOAD_MAX_BYTES) {
@@ -5356,6 +5451,20 @@ export function initLayout(containerId) {
           return;
         }
         revokeTexturePatternBitmap(state, 1);
+        if (String(f.type || '').toLowerCase().includes('svg') || String(f.name || '').toLowerCase().endsWith('.svg')) {
+          try {
+            state.texturePatternBitmapSvgText1 = await new Promise((resolve, reject) => {
+              const r = new FileReader();
+              r.onload = () => resolve(String(r.result || ''));
+              r.onerror = () => reject(r.error);
+              r.readAsText(f);
+            });
+          } catch {
+            state.texturePatternBitmapSvgText1 = '';
+          }
+        } else {
+          state.texturePatternBitmapSvgText1 = '';
+        }
         state.texturePatternBitmapUrl1 = URL.createObjectURL(f);
         state.texturePatternBitmapFilename1 = f.name || '';
         e.target.value = '';
@@ -5367,7 +5476,7 @@ export function initLayout(containerId) {
         syncTexturePatternControlsFromState(state);
         syncTextureRadial(state);
       });
-      document.getElementById('layout-texture-pat-bitmap-file-2')?.addEventListener('change', (e) => {
+      document.getElementById('layout-texture-pat-bitmap-file-2')?.addEventListener('change', async (e) => {
         const f = e.target.files?.[0];
         if (!f) {
           e.target.value = '';
@@ -5375,7 +5484,7 @@ export function initLayout(containerId) {
         }
         if (!bitmapTextureFileAllowed(f)) {
           e.target.value = '';
-          window.alert('Vyberte obrázek PNG nebo JPEG (JPG).');
+          window.alert('Vyberte obrázek PNG, JPEG (JPG), nebo SVG.');
           return;
         }
         if (f.size > TEXTURE_BITMAP_UPLOAD_MAX_BYTES) {
@@ -5384,6 +5493,20 @@ export function initLayout(containerId) {
           return;
         }
         revokeTexturePatternBitmap(state, 2);
+        if (String(f.type || '').toLowerCase().includes('svg') || String(f.name || '').toLowerCase().endsWith('.svg')) {
+          try {
+            state.texturePatternBitmapSvgText2 = await new Promise((resolve, reject) => {
+              const r = new FileReader();
+              r.onload = () => resolve(String(r.result || ''));
+              r.onerror = () => reject(r.error);
+              r.readAsText(f);
+            });
+          } catch {
+            state.texturePatternBitmapSvgText2 = '';
+          }
+        } else {
+          state.texturePatternBitmapSvgText2 = '';
+        }
         state.texturePatternBitmapUrl2 = URL.createObjectURL(f);
         state.texturePatternBitmapFilename2 = f.name || '';
         e.target.value = '';
