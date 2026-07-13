@@ -938,6 +938,29 @@ export function initForum(containerId, options = {}) {
       png.save(exportPrefix + '_' + timestamp() + '.png');
     }
 
+    function stampSolidHex(s) {
+      const pinkHex = s.color1 || p5ColorToHex(gradPink);
+      const blueHex = s.color2 || p5ColorToHex(gradBlue);
+      const pinkC = toColor(pinkHex);
+      const blueC = toColor(blueHex);
+      if (!pinkC || !blueC) return pinkHex;
+      return p5ColorToHex(sketch.lerpColor(pinkC, blueC, s.colorT ?? 0));
+    }
+
+    function stampGradientEndpoints(s, logo) {
+      const scaleVal = s.s * (s.sizeMult ?? sizeMultiplier);
+      const w = logo.width * scaleVal;
+      const h = logo.height * scaleVal;
+      const R = Math.sqrt(w * w + h * h) / 2 + 5;
+      const angle = s.gradientAngle ?? 0;
+      return {
+        x1: s.x - R * Math.cos(angle),
+        y1: s.y - R * Math.sin(angle),
+        x2: s.x + R * Math.cos(angle),
+        y2: s.y + R * Math.sin(angle),
+      };
+    }
+
     function saveSvg() {
       let svg = '<?xml version="1.0" encoding="UTF-8"?>\n';
       svg += `<svg width="${sketch.width}" height="${sketch.height}" xmlns="http://www.w3.org/2000/svg">\n`;
@@ -948,20 +971,11 @@ export function initForum(containerId, options = {}) {
         if (!logos[s.logoIdx] || !logoPathData[s.logoIdx]) return;
         if (s.colorMode === 'morph') return;
         const logo = logos[s.logoIdx];
-        const w = logo.width;
-        const h = logo.height;
         const pinkHex = s.color1 || p5ColorToHex(gradPink);
         const blueHex = s.color2 || p5ColorToHex(gradBlue);
         const pinkC = toColor(pinkHex);
         const blueC = toColor(blueHex);
-        const angle = s.gradientAngle;
-        const R = Math.sqrt(w * w + h * h) / 2 + 5;
-        const cx = w / 2;
-        const cy = h / 2;
-        const x1 = cx - R * Math.cos(angle);
-        const y1 = cy - R * Math.sin(angle);
-        const x2 = cx + R * Math.cos(angle);
-        const y2 = cy + R * Math.sin(angle);
+        const { x1, y1, x2, y2 } = stampGradientEndpoints(s, logo);
         const midHex = pinkC && blueC
           ? p5ColorToHex(sketch.lerpColor(pinkC, blueC, 0.5))
           : pinkHex;
@@ -986,19 +1000,8 @@ export function initForum(containerId, options = {}) {
         const scaleVal = s.s * (s.sizeMult ?? sizeMultiplier);
         const tr = `translate(${cx.toFixed(2)},${cy.toFixed(2)}) scale(${scaleVal.toFixed(4)}) translate(${(-w/2).toFixed(2)},${(-h/2).toFixed(2)})`;
         svg += `<g transform="${tr}">\n`;
-        let fillRef;
-        if (s.colorMode === 'morph') {
-          const pinkHex = s.color1 || p5ColorToHex(gradPink);
-          const blueHex = s.color2 || p5ColorToHex(gradBlue);
-          const pinkC = toColor(pinkHex);
-          const blueC = toColor(blueHex);
-          fillRef = pinkC && blueC
-            ? p5ColorToHex(sketch.lerpColor(pinkC, blueC, s.colorT ?? 0))
-            : pinkHex;
-        } else {
-          fillRef = `url(#g${gradIdx})`;
-          gradIdx++;
-        }
+        const fillRef = s.colorMode === 'morph' ? stampSolidHex(s) : `url(#g${gradIdx})`;
+        if (s.colorMode !== 'morph') gradIdx++;
         logoPathData[s.logoIdx].forEach(d => {
           if (!d) return;
           const dEsc = d.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
