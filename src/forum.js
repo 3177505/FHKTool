@@ -229,6 +229,7 @@ export function initForum(containerId, options = {}) {
       function wireControls() {
         const btnLogo = document.getElementById(elId('btn-logo'));
         const btnRestart = document.getElementById(elId('btn-restart'));
+        const btnStop = document.getElementById(elId('btn-stop'));
         const btnPng = document.getElementById(elId('btn-png'));
         const btnSvg = document.getElementById(elId('btn-svg'));
         const toggleA4 = document.getElementById(elId('toggle-a4'));
@@ -317,6 +318,7 @@ export function initForum(containerId, options = {}) {
           if (sliderOsc) sliderOsc.value = oscToSlider(oscSpeed);
         });
         if (btnRestart) btnRestart.addEventListener('click', restartCanvas);
+        if (btnStop) btnStop.addEventListener('click', stopAllGrowths);
         if (btnPng) btnPng.addEventListener('click', savePng);
         if (btnSvg) btnSvg.addEventListener('click', saveSvg);
 
@@ -426,6 +428,10 @@ export function initForum(containerId, options = {}) {
     function isMouseOverCanvas() {
       return sketch.mouseX >= 0 && sketch.mouseX <= sketch.width &&
         sketch.mouseY >= 0 && sketch.mouseY <= sketch.height;
+    }
+
+    function stopAllGrowths() {
+      activeGrowths = [];
     }
 
     function restartCanvas() {
