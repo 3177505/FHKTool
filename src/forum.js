@@ -100,6 +100,7 @@ export function initForum(containerId, options = {}) {
   let gradientPhaseOffset;
   let gradientCenter = 0.5;
   let colorMode = 'gradient';
+  let growPathMode = 'default';
   let sizeMultiplier = 1;
   let rebuildLogoIndex = -1;
   let lineStart = null;
@@ -251,6 +252,33 @@ export function initForum(containerId, options = {}) {
           btnColorMode.addEventListener('click', () => {
             colorMode = colorMode === 'gradient' ? 'morph' : 'gradient';
             syncColorModeUi();
+          });
+        }
+
+        const btnGrowRoam = document.getElementById(elId('btn-grow-roam'));
+        const btnGrowEntangled = document.getElementById(elId('btn-grow-entangled'));
+        const syncGrowPathUi = () => {
+          if (btnGrowRoam) {
+            btnGrowRoam.textContent = growPathMode === 'roam' ? '· Přes plátno' : 'Přes plátno';
+            btnGrowRoam.setAttribute('aria-pressed', growPathMode === 'roam' ? 'true' : 'false');
+          }
+          if (btnGrowEntangled) {
+            btnGrowEntangled.textContent = growPathMode === 'entangled' ? '· Zamotaný' : 'Zamotaný';
+            btnGrowEntangled.setAttribute('aria-pressed', growPathMode === 'entangled' ? 'true' : 'false');
+          }
+        };
+        if (btnGrowRoam) {
+          syncGrowPathUi();
+          btnGrowRoam.addEventListener('click', () => {
+            growPathMode = growPathMode === 'roam' ? 'default' : 'roam';
+            syncGrowPathUi();
+          });
+        }
+        if (btnGrowEntangled) {
+          syncGrowPathUi();
+          btnGrowEntangled.addEventListener('click', () => {
+            growPathMode = growPathMode === 'entangled' ? 'default' : 'entangled';
+            syncGrowPathUi();
           });
         }
 
@@ -569,30 +597,65 @@ export function initForum(containerId, options = {}) {
       s.heading += diff * growEdgeSteer;
     }
 
+    function bounceSnakeFromEdges(s) {
+      const margin = 12;
+      if (s.x < margin) {
+        s.x = margin;
+        s.heading = sketch.PI - s.heading + sketch.random(-0.12, 0.12);
+      }
+      if (s.x > sketch.width - margin) {
+        s.x = sketch.width - margin;
+        s.heading = sketch.PI - s.heading + sketch.random(-0.12, 0.12);
+      }
+      if (s.y < margin) {
+        s.y = margin;
+        s.heading = -s.heading + sketch.random(-0.12, 0.12);
+      }
+      if (s.y > sketch.height - margin) {
+        s.y = sketch.height - margin;
+        s.heading = -s.heading + sketch.random(-0.12, 0.12);
+      }
+    }
+
     function tickGrowths() {
+      const roam = growPathMode === 'roam';
+      const entangled = growPathMode === 'entangled';
+      const wiggleAmp = growWiggleAmp * (entangled ? 1.6 : 1);
+      const wiggleFreqMul = entangled ? 1.4 : 1;
+      const wiggleHarmonic = growWiggleHarmonic * (entangled ? 1.25 : 1);
+      const sharpChance = entangled ? growSharpTurnChance * 2.5 : growSharpTurnChance;
+      const perpJitter = growPerpendicularJitter * (entangled ? 2.5 : 1);
+      const stepLength = growStepLength * (roam ? 1.2 : 1);
+
       for (let gi = activeGrowths.length - 1; gi >= 0; gi--) {
         const s = activeGrowths[gi];
         s.age++;
         if (s.age % growFramesPerStep !== 0) continue;
 
-        s.wigglePhase += s.wiggleFreq;
-        const wiggle = Math.sin(s.wigglePhase) * growWiggleAmp;
-        const dance = Math.sin(s.wigglePhase * 2.17 + 0.6) * growWiggleAmp * growWiggleHarmonic;
+        s.wigglePhase += s.wiggleFreq * wiggleFreqMul;
+        const wiggle = Math.sin(s.wigglePhase) * wiggleAmp;
+        const dance = Math.sin(s.wigglePhase * 2.17 + 0.6) * wiggleAmp * wiggleHarmonic;
         s.heading += wiggle + dance;
 
-        if (growSharpTurnChance > 0 && sketch.random() < growSharpTurnChance) {
+        if (sharpChance > 0 && sketch.random() < sharpChance) {
           s.heading += (sketch.random() < 0.5 ? -1 : 1) * sketch.random(growSharpTurnMin, growSharpTurnMax);
+        } else if (entangled && sketch.random() < 0.025) {
+          s.heading += (sketch.random() < 0.5 ? -1 : 1) * sketch.random(0.9, 2.4);
         } else if (sketch.random() < 0.01) {
           s.heading += sketch.random(-0.04, 0.04);
         }
 
-        steerSnakeFromEdges(s);
+        if (roam) {
+          bounceSnakeFromEdges(s);
+        } else {
+          steerSnakeFromEdges(s);
+        }
 
-        s.x += Math.cos(s.heading) * growStepLength;
-        s.y += Math.sin(s.heading) * growStepLength;
+        s.x += Math.cos(s.heading) * stepLength;
+        s.y += Math.sin(s.heading) * stepLength;
 
         const perp = s.heading + sketch.HALF_PI;
-        const jitter = sketch.random(-growPerpendicularJitter, growPerpendicularJitter);
+        const jitter = sketch.random(-perpJitter, perpJitter);
         const px = s.x + Math.cos(perp) * jitter;
         const py = s.y + Math.sin(perp) * jitter;
 

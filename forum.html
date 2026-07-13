@@ -28,32 +28,44 @@
         <p class="forum-sidebar-hint">Dvojklik bod A, pak klik bod B → rovnoměrná řada razítek. Mezerník: změna loga | R: restart | P: PNG | S: SVG | +/-: velikost | Šipky ↑↓: rychlost oscilace | Šipky ←→: střed přechodu</p>
       </div>
       <div class="layout-sidebar-col layout-sidebar-col--tools">
-        <div class="forum-palette layout-palette">
-          <ul class="layout-palette-list">
-            <li class="layout-palette-line">
-              <span class="layout-palette-label">Barva 1</span>
-              <div class="layout-palette-swatch" id="forum-color1-swatch"></div>
-            </li>
-            <li class="layout-palette-line">
-              <span class="layout-palette-label">Barva 2</span>
-              <div class="layout-palette-swatch" id="forum-color2-swatch"></div>
-            </li>
-            <li class="layout-palette-line layout-palette-line--buttons">
-              <button type="button" id="forum-btn-save-palette">Uložit paletu</button>
-              <button type="button" id="forum-btn-reset-palette">Obnovit</button>
-            </li>
-          </ul>
-        </div>
-        <div class="layout-sidebar-sep"></div>
-        <div class="forum-controls">
-          <label class="forum-toggle-a4"><input type="checkbox" id="forum-toggle-a4" checked> Rám A4</label>
+        <section class="forum-tools-section">
+          <p class="forum-tools-section-title">Barvy</p>
+          <div class="forum-palette layout-palette">
+            <ul class="layout-palette-list">
+              <li class="layout-palette-line">
+                <span class="layout-palette-label">Barva 1</span>
+                <div class="layout-palette-swatch" id="forum-color1-swatch"></div>
+              </li>
+              <li class="layout-palette-line">
+                <span class="layout-palette-label">Barva 2</span>
+                <div class="layout-palette-swatch" id="forum-color2-swatch"></div>
+              </li>
+              <li class="layout-palette-line layout-palette-line--buttons">
+                <button type="button" id="forum-btn-save-palette">Uložit paletu</button>
+                <button type="button" id="forum-btn-reset-palette">Obnovit</button>
+              </li>
+            </ul>
+          </div>
           <button type="button" id="forum-btn-color-mode">Barvy: gradient</button>
-          <button type="button" id="forum-btn-logo">Změnit logo</button>
-          <button type="button" id="forum-btn-restart">Restartovat</button>
-          <label>Rychlost oscilace <input type="range" id="forum-slider-osc" min="1" max="100" value="20"></label>
-          <label>Střed přechodu <input type="range" id="forum-slider-grad" min="10" max="90" value="50"></label>
-          <label>Velikost <input type="range" id="forum-slider-size" min="50" max="200" value="100"></label>
-        </div>
+        </section>
+        <div class="layout-sidebar-sep"></div>
+        <section class="forum-tools-section">
+          <p class="forum-tools-section-title">Plátno</p>
+          <div class="forum-controls">
+            <label class="forum-toggle-a4"><input type="checkbox" id="forum-toggle-a4" checked> Rám A4</label>
+            <button type="button" id="forum-btn-logo">Změnit logo</button>
+            <button type="button" id="forum-btn-restart">Restartovat</button>
+          </div>
+        </section>
+        <div class="layout-sidebar-sep"></div>
+        <section class="forum-tools-section">
+          <p class="forum-tools-section-title">Nastavení</p>
+          <div class="forum-controls">
+            <label>Rychlost oscilace <input type="range" id="forum-slider-osc" min="1" max="100" value="20"></label>
+            <label>Střed přechodu <input type="range" id="forum-slider-grad" min="10" max="90" value="50"></label>
+            <label>Velikost <input type="range" id="forum-slider-size" min="50" max="200" value="100"></label>
+          </div>
+        </section>
       </div>
     </aside>
     <main>
