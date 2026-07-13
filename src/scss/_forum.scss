@@ -64,7 +64,8 @@ body.forum-page .layout-workspace > main {
   overflow: hidden;
 }
 
-#forum-canvas {
+#forum-canvas,
+#forum-dense-canvas {
   display: flex;
   justify-content: center;
   align-items: center;

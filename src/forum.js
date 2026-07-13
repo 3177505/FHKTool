@@ -6,6 +6,37 @@ const FORUM_PALETTE_STORAGE_KEY = 'forum-palette';
 const FORUM_DEFAULT_COLOR1 = '#ff0080';
 const FORUM_DEFAULT_COLOR2 = '#0066ff';
 
+const FORUM_PRESETS = {
+  default: {
+    stampSpacing: 12,
+    minSpacing: 12,
+    maxSpacing: 100,
+    lineStampSpacing: 20,
+    minScale: 0.07,
+    maxScale: 0.2,
+    exportPrefix: 'forum',
+  },
+  dense: {
+    stampSpacing: 1,
+    minSpacing: 1,
+    maxSpacing: 8,
+    lineStampSpacing: 2,
+    minScale: 0.05,
+    maxScale: 0.14,
+    exportPrefix: 'forum-dense',
+    interactionMode: 'grow',
+    growStepLength: 1.8,
+    growFramesPerStep: 4,
+    growWiggleAmp: 0.09,
+    growWiggleFreq: 0.04,
+    growWiggleHarmonic: 0.35,
+    growPerpendicularJitter: 1,
+    growMinDurationMs: 20000,
+    growMaxDurationMs: 40000,
+    growEdgeSteer: 0.07,
+  },
+};
+
 function loadForumPaletteFromStorage() {
   try {
     const raw = localStorage.getItem(FORUM_PALETTE_STORAGE_KEY);
@@ -32,19 +63,26 @@ const LOGO_COUNT = 7;
 const GRADIENT_ANGLE_STEPS = 24;
 const DOUBLE_CLICK_MS = 400;
 const DOUBLE_CLICK_PIX = 15;
+const SIZE_STEP = 0.05;
+const SIZE_MIN = 0.5;
+const SIZE_MAX = 2;
 
-export function initForum(containerId) {
+export function initForum(containerId, options = {}) {
+  const preset = FORUM_PRESETS[options.preset] || FORUM_PRESETS.default;
+  const prefix = options.prefix || containerId.replace(/-canvas$/, '');
+  const elId = (suffix) => `${prefix}-${suffix}`;
+
   let logos = [];
   let logoMasks = [];
   let gradMasked = [];
   let logoPathData = [];
   let currentLogoIndex = 0;
-  let stampSpacing = 12;
-  let minSpacing = 12;
-  let maxSpacing = 100;
+  let stampSpacing = preset.stampSpacing;
+  let minSpacing = preset.minSpacing;
+  let maxSpacing = preset.maxSpacing;
   let maxSpeed = 40;
-  let minScale = 0.07;
-  let maxScale = 0.2;
+  let minScale = preset.minScale;
+  let maxScale = preset.maxScale;
   let oscSpeed;
   let oscSpeedFrom = 0.01;
   let oscSpeedTo = 0.2;
@@ -60,11 +98,25 @@ export function initForum(containerId) {
   let lastClickTime = 0;
   let lastClickX = 0;
   let lastClickY = 0;
-  let lineStampSpacing = 20;
+  let lineStampSpacing = preset.lineStampSpacing;
   let drawing;
   let stamps = [];
   let lastStampPos = { x: -9999, y: -9999 };
   let a4Frame = true;
+  const exportPrefix = preset.exportPrefix;
+  const interactionMode = preset.interactionMode || 'stamp';
+  const growStepLength = preset.growStepLength || 2;
+  const growFramesPerStep = preset.growFramesPerStep || 3;
+  const growWiggleAmp = preset.growWiggleAmp || 0.08;
+  const growWiggleFreq = preset.growWiggleFreq || 0.04;
+  const growWiggleHarmonic = preset.growWiggleHarmonic || 0.3;
+  const growPerpendicularJitter = preset.growPerpendicularJitter || 1;
+  const growMinDurationMs = preset.growMinDurationMs || 20000;
+  const growMaxDurationMs = preset.growMaxDurationMs || 40000;
+  const growEdgeSteer = preset.growEdgeSteer || 0.06;
+  let activeGrowths = [];
+  let toColor;
+  let p5ColorToHex;
 
   const getCanvasDimensions = () => {
     const el = document.getElementById(containerId);
@@ -75,6 +127,16 @@ export function initForum(containerId) {
       return { w: Math.round(h * A4_RATIO), h };
     }
     return { w, h };
+  };
+
+  const syncSizeSlider = () => {
+    const sliderSize = document.getElementById(elId('slider-size'));
+    if (sliderSize) sliderSize.value = Math.round(sizeMultiplier * 100);
+  };
+
+  const adjustSize = (delta) => {
+    sizeMultiplier = Math.min(SIZE_MAX, Math.max(SIZE_MIN, sizeMultiplier + delta));
+    syncSizeSlider();
   };
 
   return new p5((sketch) => {
@@ -97,10 +159,15 @@ export function initForum(containerId) {
           x: s.x * scaleX,
           y: s.y * scaleY
         }));
+        activeGrowths = activeGrowths.map(g => ({
+          ...g,
+          x: g.x * scaleX,
+          y: g.y * scaleY,
+        }));
       }
       drawing = sketch.createGraphics(canvasW, canvasH, sketch.P2D);
       drawing.background(255);
-      stamps.forEach(s => drawStampAt(drawing, s.x, s.y, s.s, s.logoIdx, s.gradientAngle));
+      stamps.forEach(s => drawStampFromStamp(drawing, s));
       const el = document.getElementById(containerId);
       if (el) el.classList.toggle('forum-full-width', !a4Frame);
     };
@@ -112,11 +179,12 @@ export function initForum(containerId) {
       const el = document.getElementById(containerId);
       if (el) el.classList.toggle('forum-full-width', !a4Frame);
       sketch.smooth(8);
-      const toColor = (hex) => {
+      toColor = (hex) => {
         const h = String(hex || '').trim();
         if (/^#?[0-9a-fA-F]{6}$/.test(h)) return sketch.color(h.startsWith('#') ? h : '#' + h);
         return null;
       };
+      p5ColorToHex = (c) => '#' + sketch.hex(sketch.red(c), 2) + sketch.hex(sketch.green(c), 2) + sketch.hex(sketch.blue(c), 2);
       const saved = loadForumPaletteFromStorage();
       const hex1 = saved ? saved[0] : FORUM_DEFAULT_COLOR1;
       const hex2 = saved ? saved[1] : FORUM_DEFAULT_COLOR2;
@@ -133,14 +201,14 @@ export function initForum(containerId) {
       });
 
       function wireControls() {
-        const btnLogo = document.getElementById('forum-btn-logo');
-        const btnRestart = document.getElementById('forum-btn-restart');
-        const btnPng = document.getElementById('forum-btn-png');
-        const btnSvg = document.getElementById('forum-btn-svg');
-        const toggleA4 = document.getElementById('forum-toggle-a4');
-        const sliderOsc = document.getElementById('forum-slider-osc');
-        const sliderGrad = document.getElementById('forum-slider-grad');
-        const sliderSize = document.getElementById('forum-slider-size');
+        const btnLogo = document.getElementById(elId('btn-logo'));
+        const btnRestart = document.getElementById(elId('btn-restart'));
+        const btnPng = document.getElementById(elId('btn-png'));
+        const btnSvg = document.getElementById(elId('btn-svg'));
+        const toggleA4 = document.getElementById(elId('toggle-a4'));
+        const sliderOsc = document.getElementById(elId('slider-osc'));
+        const sliderGrad = document.getElementById(elId('slider-grad'));
+        const sliderSize = document.getElementById(elId('slider-size'));
 
         if (toggleA4) {
           toggleA4.checked = a4Frame;
@@ -149,24 +217,24 @@ export function initForum(containerId) {
             doResize();
           });
         }
-        function p5ColorToHex(c) {
-          return '#' + sketch.hex(sketch.red(c), 2) + sketch.hex(sketch.green(c), 2) + sketch.hex(sketch.blue(c), 2);
+        function p5ColorToHexLocal(c) {
+          return p5ColorToHex(c);
         }
         function buildForumSwatch(containerId, getColor, setColor) {
           const container = document.getElementById(containerId);
           if (!container) return;
           const update = () => {
-            const hex = p5ColorToHex(getColor());
+            const hex = p5ColorToHexLocal(getColor());
             colorInput.value = hex;
             hexInput.value = hex;
           };
           container.innerHTML = '';
           const colorInput = document.createElement('input');
           colorInput.type = 'color';
-          colorInput.value = p5ColorToHex(getColor());
+          colorInput.value = p5ColorToHexLocal(getColor());
           const hexInput = document.createElement('input');
           hexInput.type = 'text';
-          hexInput.value = p5ColorToHex(getColor());
+          hexInput.value = p5ColorToHexLocal(getColor());
           hexInput.placeholder = '#000000';
           hexInput.maxLength = 7;
           const syncFromColor = () => {
@@ -175,7 +243,7 @@ export function initForum(containerId) {
           };
           const syncFromHex = () => {
             const c = toColor(hexInput.value);
-            if (c) { setColor(c); colorInput.value = p5ColorToHex(c); rebuildLogoIndex = 0; }
+            if (c) { setColor(c); colorInput.value = p5ColorToHexLocal(c); rebuildLogoIndex = 0; }
           };
           colorInput.addEventListener('input', syncFromColor);
           colorInput.addEventListener('change', syncFromColor);
@@ -185,19 +253,19 @@ export function initForum(containerId) {
           container.appendChild(hexInput);
           return update;
         }
-        buildForumSwatch('forum-color1-swatch', () => gradPink, (c) => { gradPink = c; })();
-        buildForumSwatch('forum-color2-swatch', () => gradBlue, (c) => { gradBlue = c; })();
-        document.getElementById('forum-btn-save-palette')?.addEventListener('click', () => {
-          saveForumPaletteToStorage(p5ColorToHex(gradPink), p5ColorToHex(gradBlue));
-          const btn = document.getElementById('forum-btn-save-palette');
+        buildForumSwatch(elId('color1-swatch'), () => gradPink, (c) => { gradPink = c; })();
+        buildForumSwatch(elId('color2-swatch'), () => gradBlue, (c) => { gradBlue = c; })();
+        document.getElementById(elId('btn-save-palette'))?.addEventListener('click', () => {
+          saveForumPaletteToStorage(p5ColorToHexLocal(gradPink), p5ColorToHexLocal(gradBlue));
+          const btn = document.getElementById(elId('btn-save-palette'));
           if (btn) { const orig = btn.textContent; btn.textContent = 'Uloženo!'; setTimeout(() => { btn.textContent = orig; }, 1500); }
         });
-        document.getElementById('forum-btn-reset-palette')?.addEventListener('click', () => {
+        document.getElementById(elId('btn-reset-palette'))?.addEventListener('click', () => {
           gradPink = toColor(FORUM_DEFAULT_COLOR1) || sketch.color(255, 0, 128);
           gradBlue = toColor(FORUM_DEFAULT_COLOR2) || sketch.color(0, 102, 255);
           rebuildLogoIndex = 0;
-          buildForumSwatch('forum-color1-swatch', () => gradPink, (c) => { gradPink = c; })();
-          buildForumSwatch('forum-color2-swatch', () => gradBlue, (c) => { gradBlue = c; })();
+          buildForumSwatch(elId('color1-swatch'), () => gradPink, (c) => { gradPink = c; })();
+          buildForumSwatch(elId('color2-swatch'), () => gradBlue, (c) => { gradBlue = c; })();
         });
         if (btnLogo) btnLogo.addEventListener('click', () => {
           currentLogoIndex = (currentLogoIndex + 1) % LOGO_COUNT;
@@ -318,6 +386,136 @@ export function initForum(containerId) {
       stamps = [];
       lastStampPos = { x: -9999, y: -9999 };
       lineStart = null;
+      activeGrowths = [];
+    }
+
+    function currentScaleOsc() {
+      return sketch.map(sketch.sin(sketch.frameCount * oscSpeed), -1, 1, minScale, maxScale);
+    }
+
+    function currentGradientAngle() {
+      return sketch.frameCount * oscSpeed + gradientPhaseOffset;
+    }
+
+    function snapshotPrintStyle(gradientAngle) {
+      return {
+        color1: p5ColorToHex(gradPink),
+        color2: p5ColorToHex(gradBlue),
+        gradCenter: gradientCenter,
+        gradientAngle,
+        sizeMult: sizeMultiplier,
+      };
+    }
+
+    function bakeStampGradient(logoIdx, style) {
+      if (!logos[logoIdx] || !logoMasks[logoIdx]) return null;
+      const w = Math.max(1, Math.floor(logos[logoIdx].width));
+      const h = Math.max(1, Math.floor(logos[logoIdx].height));
+      const R = Math.sqrt(w * w + h * h) / 2 + 2;
+      const pink = toColor(style.color1) || gradPink;
+      const blue = toColor(style.color2) || gradBlue;
+      const gc = style.gradCenter;
+      let a = style.gradientAngle % sketch.TWO_PI;
+      if (a < 0) a += sketch.TWO_PI;
+      const angle = Math.round(a / (sketch.TWO_PI / GRADIENT_ANGLE_STEPS)) * sketch.TWO_PI / GRADIENT_ANGLE_STEPS;
+      const gradBuf = sketch.createGraphics(w, h, sketch.P2D);
+      gradBuf.background(pink);
+      gradBuf.noStroke();
+      gradBuf.push();
+      gradBuf.translate(w / 2, h / 2);
+      gradBuf.rotate(angle);
+      for (let y = -R; y <= R; y += 1) {
+        let p = (y + R) / (2 * R);
+        p = sketch.constrain(p, 0, 1);
+        let t;
+        if (gc <= 0.001) t = 1;
+        else if (gc >= 0.999) t = 0;
+        else if (p <= gc) t = 0.5 * p / gc;
+        else t = 0.5 + 0.5 * (p - gc) / (1 - gc);
+        t = sketch.constrain(t, 0, 1);
+        gradBuf.fill(sketch.lerpColor(pink, blue, t));
+        gradBuf.rect(-R, y, 2 * R, 1.5);
+      }
+      gradBuf.pop();
+      const gradImg = gradBuf.get(0, 0, gradBuf.width, gradBuf.height);
+      gradImg.mask(logoMasks[logoIdx]);
+      return gradImg;
+    }
+
+    function commitStamp(x, y, scaleOsc, logoIdx, gradientAngle) {
+      if (!logos[logoIdx]) return null;
+      const style = snapshotPrintStyle(gradientAngle);
+      const baked = bakeStampGradient(logoIdx, style);
+      const effectiveScale = scaleOsc * style.sizeMult;
+      const p = clampStampToCanvas(x, y, effectiveScale, logoIdx);
+      const stamp = { x: p.x, y: p.y, s: scaleOsc, logoIdx, ...style, baked };
+      stamps.push(stamp);
+      drawStampFromStamp(drawing, stamp);
+      return p;
+    }
+
+    function startGrowth(x, y) {
+      const heading = sketch.random(sketch.TWO_PI);
+      const seedScale = sketch.lerp(minScale, maxScale, 0.5);
+      commitStamp(x, y, seedScale, currentLogoIndex, currentGradientAngle() + heading);
+      activeGrowths.push({
+        x,
+        y,
+        heading,
+        logoIdx: currentLogoIndex,
+        wigglePhase: sketch.random(sketch.TWO_PI),
+        wiggleFreq: growWiggleFreq * sketch.random(0.85, 1.15),
+        endTime: Date.now() + sketch.random(growMinDurationMs, growMaxDurationMs),
+        age: 0,
+      });
+    }
+
+    function steerSnakeFromEdges(s) {
+      const margin = 28;
+      let dx = 0;
+      let dy = 0;
+      if (s.x < margin) dx += (margin - s.x) / margin;
+      if (s.x > sketch.width - margin) dx -= (s.x - (sketch.width - margin)) / margin;
+      if (s.y < margin) dy += (margin - s.y) / margin;
+      if (s.y > sketch.height - margin) dy -= (s.y - (sketch.height - margin)) / margin;
+      if (dx === 0 && dy === 0) return;
+      const target = Math.atan2(dy, dx);
+      let diff = target - s.heading;
+      while (diff > Math.PI) diff -= sketch.TWO_PI;
+      while (diff < -Math.PI) diff += sketch.TWO_PI;
+      s.heading += diff * growEdgeSteer;
+    }
+
+    function tickGrowths() {
+      for (let gi = activeGrowths.length - 1; gi >= 0; gi--) {
+        const s = activeGrowths[gi];
+        s.age++;
+        if (s.age % growFramesPerStep !== 0) continue;
+
+        s.wigglePhase += s.wiggleFreq;
+        const wiggle = Math.sin(s.wigglePhase) * growWiggleAmp;
+        const dance = Math.sin(s.wigglePhase * 2.17 + 0.6) * growWiggleAmp * growWiggleHarmonic;
+        s.heading += wiggle + dance;
+
+        if (sketch.random() < 0.015) {
+          s.heading += sketch.random(-0.06, 0.06);
+        }
+
+        steerSnakeFromEdges(s);
+
+        s.x += Math.cos(s.heading) * growStepLength;
+        s.y += Math.sin(s.heading) * growStepLength;
+
+        const perp = s.heading + sketch.HALF_PI;
+        const jitter = sketch.random(-growPerpendicularJitter, growPerpendicularJitter);
+        const px = s.x + Math.cos(perp) * jitter;
+        const py = s.y + Math.sin(perp) * jitter;
+
+        const scaleOsc = sketch.lerp(minScale, maxScale, 0.5 + 0.5 * Math.sin(s.wigglePhase * 1.3));
+        commitStamp(px, py, scaleOsc, s.logoIdx, currentGradientAngle() + s.heading);
+
+        if (Date.now() >= s.endTime) activeGrowths.splice(gi, 1);
+      }
     }
 
     sketch.draw = () => {
@@ -329,13 +527,15 @@ export function initForum(containerId) {
         if (rebuildLogoIndex >= LOGO_COUNT) rebuildLogoIndex = -1;
       }
 
-      if (sketch.mouseIsPressed) {
+      if (sketch.mouseIsPressed && interactionMode === 'stamp') {
         const moveSpeed = sketch.dist(sketch.mouseX, sketch.mouseY, sketch.pmouseX, sketch.pmouseY);
         stampSpacing = sketch.constrain(sketch.map(moveSpeed, 0, maxSpeed, minSpacing, maxSpacing), minSpacing, maxSpacing);
       }
 
-      const scaleOsc = sketch.map(sketch.sin(sketch.frameCount * oscSpeed), -1, 1, minScale, maxScale);
-      const gradientAngle = sketch.frameCount * oscSpeed + gradientPhaseOffset;
+      if (interactionMode === 'grow') tickGrowths();
+
+      const scaleOsc = currentScaleOsc();
+      const gradientAngle = currentGradientAngle();
 
       sketch.background(255);
       sketch.image(drawing, 0, 0);
@@ -346,6 +546,15 @@ export function initForum(containerId) {
 
     sketch.mousePressed = () => {
       if (sketch.mouseButton !== sketch.LEFT && sketch.mouseButton !== sketch.RIGHT) return;
+
+      if (interactionMode === 'grow') {
+        startGrowth(sketch.mouseX, sketch.mouseY);
+        lastClickTime = Date.now();
+        lastClickX = sketch.mouseX;
+        lastClickY = sketch.mouseY;
+        return;
+      }
+
       const t = Date.now();
       const isDoubleClick = (t - lastClickTime < DOUBLE_CLICK_MS) &&
         sketch.dist(sketch.mouseX, sketch.mouseY, lastClickX, lastClickY) < DOUBLE_CLICK_PIX;
@@ -376,8 +585,9 @@ export function initForum(containerId) {
     };
 
     sketch.mouseDragged = () => {
+      if (interactionMode === 'grow') return;
       if (sketch.mouseButton === sketch.LEFT || sketch.mouseButton === sketch.RIGHT) {
-        const scaleOsc = sketch.map(sketch.sin(sketch.frameCount * oscSpeed), -1, 1, minScale, maxScale);
+        const scaleOsc = currentScaleOsc();
         const p = clampStampToCanvas(sketch.mouseX, sketch.mouseY, scaleOsc, currentLogoIndex);
         if (sketch.dist(p.x, p.y, lastStampPos.x, lastStampPos.y) >= stampSpacing) {
           placeStamp();
@@ -409,25 +619,22 @@ export function initForum(containerId) {
         gradientCenter = sketch.constrain(gradientCenter, 0.1, 0.9);
         rebuildLogoIndex = 0;
       }
+      if (sketch.key === '-' || sketch.key === '_') adjustSize(-SIZE_STEP);
+      if (sketch.key === '+' || sketch.key === '=') adjustSize(SIZE_STEP);
       if (sketch.key === 'r' || sketch.key === 'R') restartCanvas();
       if (sketch.key === 'p' || sketch.key === 'P') savePng();
       if (sketch.key === 's' || sketch.key === 'S') saveSvg();
 
-      const sliderOsc = document.getElementById('forum-slider-osc');
-      const sliderGrad = document.getElementById('forum-slider-grad');
+      const sliderOsc = document.getElementById(elId('slider-osc'));
+      const sliderGrad = document.getElementById(elId('slider-grad'));
       if (sliderOsc) sliderOsc.value = Math.round(sketch.map(oscSpeed, 0.001, 1, 1, 100));
       if (sliderGrad) sliderGrad.value = Math.round(gradientCenter * 100);
     };
 
     function placeStamp() {
       if (!logos[currentLogoIndex]) return;
-      const scaleOsc = sketch.map(sketch.sin(sketch.frameCount * oscSpeed), -1, 1, minScale, maxScale);
-      const gradientAngle = sketch.frameCount * oscSpeed + gradientPhaseOffset;
-      const effectiveScale = scaleOsc * sizeMultiplier;
-      const p = clampStampToCanvas(sketch.mouseX, sketch.mouseY, effectiveScale, currentLogoIndex);
-      lastStampPos = { x: p.x, y: p.y };
-      stamps.push({ x: p.x, y: p.y, s: scaleOsc, logoIdx: currentLogoIndex, gradientAngle });
-      drawStampAt(drawing, p.x, p.y, scaleOsc, currentLogoIndex, gradientAngle);
+      const p = commitStamp(sketch.mouseX, sketch.mouseY, currentScaleOsc(), currentLogoIndex, currentGradientAngle());
+      if (p) lastStampPos = { x: p.x, y: p.y };
     }
 
     function placeStampsAlongLine(A, B, scaleAtA, gradientAngleAtA) {
@@ -447,8 +654,7 @@ export function initForum(containerId) {
           y: sketch.lerp(A.y, B.y, t)
         };
         const clamped = clampStampToCanvas(pt.x, pt.y, effectiveScale, currentLogoIndex);
-        stamps.push({ x: clamped.x, y: clamped.y, s, logoIdx: currentLogoIndex, gradientAngle });
-        drawStampAt(drawing, clamped.x, clamped.y, s, currentLogoIndex, gradientAngle);
+        commitStamp(clamped.x, clamped.y, s, currentLogoIndex, gradientAngle);
       }
       lastStampPos = { x: B.x, y: B.y };
     }
@@ -462,6 +668,23 @@ export function initForum(containerId) {
       p.x = sketch.constrain(cx, hw, sketch.width - hw);
       p.y = sketch.constrain(cy, hh, sketch.height - hh);
       return p;
+    }
+
+    function drawStampFromStamp(pg, stamp) {
+      if (!logos[stamp.logoIdx]) return;
+      const effectiveS = stamp.s * stamp.sizeMult;
+      const logo = logos[stamp.logoIdx];
+      const p = clampStampToCanvas(stamp.x, stamp.y, effectiveS, stamp.logoIdx);
+      const w = logo.width * effectiveS;
+      const h = logo.height * effectiveS;
+      if (stamp.baked) {
+        pg.push();
+        pg.translate(p.x, p.y);
+        pg.image(stamp.baked, -w / 2, -h / 2, w, h);
+        pg.pop();
+        return;
+      }
+      drawStampAt(pg, p.x, p.y, stamp.s, stamp.logoIdx, stamp.gradientAngle);
     }
 
     function drawStampAt(pg, cx, cy, s, logoIdx, gradientAngle) {
@@ -501,15 +724,11 @@ export function initForum(containerId) {
       png.smooth(8);
       png.scale(PNG_EXPORT_SCALE);
       png.background(255);
-      stamps.forEach(s => drawStampAt(png, s.x, s.y, s.s, s.logoIdx, s.gradientAngle));
-      png.save('forum_' + timestamp() + '.png');
+      stamps.forEach(s => drawStampFromStamp(png, s));
+      png.save(exportPrefix + '_' + timestamp() + '.png');
     }
 
     function saveSvg() {
-      const pinkHex = '#' + sketch.hex(sketch.red(gradPink), 2) + sketch.hex(sketch.green(gradPink), 2) + sketch.hex(sketch.blue(gradPink), 2);
-      const blueHex = '#' + sketch.hex(sketch.red(gradBlue), 2) + sketch.hex(sketch.green(gradBlue), 2) + sketch.hex(sketch.blue(gradBlue), 2);
-      const midHex = '#' + sketch.hex(sketch.red(sketch.lerpColor(gradPink, gradBlue, 0.5)), 2) + sketch.hex(sketch.green(sketch.lerpColor(gradPink, gradBlue, 0.5)), 2) + sketch.hex(sketch.blue(sketch.lerpColor(gradPink, gradBlue, 0.5)), 2);
-
       let svg = '<?xml version="1.0" encoding="UTF-8"?>\n';
       svg += `<svg width="${sketch.width}" height="${sketch.height}" xmlns="http://www.w3.org/2000/svg">\n`;
       svg += '<rect width="100%" height="100%" fill="#ffffff"/>\n<defs>\n';
@@ -528,7 +747,14 @@ export function initForum(containerId) {
         const y1 = cy - R * Math.sin(angle);
         const x2 = cx + R * Math.cos(angle);
         const y2 = cy + R * Math.sin(angle);
-        const gc = sketch.constrain(gradientCenter, 0.01, 0.99);
+        const pinkHex = s.color1 || p5ColorToHex(gradPink);
+        const blueHex = s.color2 || p5ColorToHex(gradBlue);
+        const pinkC = toColor(pinkHex);
+        const blueC = toColor(blueHex);
+        const midHex = pinkC && blueC
+          ? p5ColorToHex(sketch.lerpColor(pinkC, blueC, 0.5))
+          : pinkHex;
+        const gc = sketch.constrain(s.gradCenter ?? gradientCenter, 0.01, 0.99);
         svg += `  <linearGradient id="g${gradIdx}" gradientUnits="userSpaceOnUse" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}">\n`;
         svg += `    <stop offset="0" stop-color="${pinkHex}"/>\n`;
         svg += `    <stop offset="${gc.toFixed(3)}" stop-color="${midHex}"/>\n`;
@@ -546,7 +772,7 @@ export function initForum(containerId) {
         const cy = s.y;
         const w = logo.width;
         const h = logo.height;
-        const scaleVal = s.s * sizeMultiplier;
+        const scaleVal = s.s * (s.sizeMult ?? sizeMultiplier);
         const tr = `translate(${cx.toFixed(2)},${cy.toFixed(2)}) scale(${scaleVal.toFixed(4)}) translate(${(-w/2).toFixed(2)},${(-h/2).toFixed(2)})`;
         svg += `<g transform="${tr}">\n`;
         const gradRef = `url(#g${gradIdx})`;
@@ -564,7 +790,7 @@ export function initForum(containerId) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'forum_' + timestamp() + '.svg';
+      a.download = exportPrefix + '_' + timestamp() + '.svg';
       a.click();
       URL.revokeObjectURL(url);
     }
@@ -579,5 +805,5 @@ export function initForum(containerId) {
 
 const container = document.getElementById('forum-canvas');
 if (container) {
-  initForum('forum-canvas');
+  initForum('forum-canvas', { preset: 'default', prefix: 'forum' });
 }
