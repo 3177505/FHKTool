@@ -58,7 +58,8 @@ body.forum-page .forum-controls {
     gap: $spacing-xs;
   }
 
-  label.forum-toggle-a4 {
+  label.forum-toggle-a4,
+  label.forum-toggle-grow {
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -76,8 +77,9 @@ body.forum-page .layout-workspace > main {
   overflow: hidden;
 }
 
-#forum-canvas,
-#forum-dense-canvas {
+#forum-v1-canvas,
+#forum-v2-canvas,
+#forum-v3-canvas {
   display: flex;
   justify-content: center;
   align-items: center;

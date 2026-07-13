@@ -7,24 +7,47 @@ const FORUM_DEFAULT_COLOR1 = '#ff0080';
 const FORUM_DEFAULT_COLOR2 = '#0066ff';
 
 const FORUM_PRESETS = {
-  default: {
+  v1: {
     stampSpacing: 12,
     minSpacing: 12,
     maxSpacing: 100,
     lineStampSpacing: 20,
     minScale: 0.07,
     maxScale: 0.2,
-    exportPrefix: 'forum',
+    exportPrefix: 'forum-v1',
+    interactionMode: 'stamp',
   },
-  dense: {
+  v2: {
     stampSpacing: 1,
     minSpacing: 1,
     maxSpacing: 8,
     lineStampSpacing: 2,
     minScale: 0.05,
     maxScale: 0.14,
-    exportPrefix: 'forum-dense',
+    exportPrefix: 'forum-v2',
     interactionMode: 'grow',
+    growStepLength: 1.8,
+    growFramesPerStep: 4,
+    growWiggleAmp: 0.09,
+    growWiggleFreq: 0.04,
+    growWiggleHarmonic: 0.35,
+    growPerpendicularJitter: 1,
+    growMinDurationMs: 20000,
+    growMaxDurationMs: 40000,
+    growEdgeSteer: 0.07,
+    growSharpTurnChance: 0.04,
+    growSharpTurnMin: 0.55,
+    growSharpTurnMax: 1.35,
+  },
+  v3: {
+    stampSpacing: 1,
+    minSpacing: 1,
+    maxSpacing: 8,
+    lineStampSpacing: 2,
+    minScale: 0.05,
+    maxScale: 0.14,
+    exportPrefix: 'forum-v3',
+    interactionMode: 'both',
     growStepLength: 1.8,
     growFramesPerStep: 4,
     growWiggleAmp: 0.09,
@@ -77,7 +100,7 @@ const OSC_SPEED_RANDOM_FROM = 0.004;
 const OSC_SPEED_RANDOM_TO = 0.032;
 
 export function initForum(containerId, options = {}) {
-  const preset = FORUM_PRESETS[options.preset] || FORUM_PRESETS.default;
+  const preset = FORUM_PRESETS[options.preset] || FORUM_PRESETS.v1;
   const prefix = options.prefix || containerId.replace(/-canvas$/, '');
   const elId = (suffix) => `${prefix}-${suffix}`;
 
@@ -116,6 +139,8 @@ export function initForum(containerId, options = {}) {
   let a4Frame = true;
   const exportPrefix = preset.exportPrefix;
   const interactionMode = preset.interactionMode || 'stamp';
+  const canGrow = interactionMode === 'grow' || interactionMode === 'both';
+  const canStamp = interactionMode === 'stamp' || interactionMode === 'both';
   const growStepLength = preset.growStepLength || 2;
   const growFramesPerStep = preset.growFramesPerStep || 3;
   const growWiggleAmp = preset.growWiggleAmp || 0.08;
@@ -255,30 +280,32 @@ export function initForum(containerId, options = {}) {
           });
         }
 
-        const btnGrowRoam = document.getElementById(elId('btn-grow-roam'));
-        const btnGrowEntangled = document.getElementById(elId('btn-grow-entangled'));
+        const toggleGrowRoam = document.getElementById(elId('toggle-grow-roam'));
+        const toggleGrowEntangled = document.getElementById(elId('toggle-grow-entangled'));
         const syncGrowPathUi = () => {
-          if (btnGrowRoam) {
-            btnGrowRoam.textContent = growPathMode === 'roam' ? '· Přes plátno' : 'Přes plátno';
-            btnGrowRoam.setAttribute('aria-pressed', growPathMode === 'roam' ? 'true' : 'false');
-          }
-          if (btnGrowEntangled) {
-            btnGrowEntangled.textContent = growPathMode === 'entangled' ? '· Zamotaný' : 'Zamotaný';
-            btnGrowEntangled.setAttribute('aria-pressed', growPathMode === 'entangled' ? 'true' : 'false');
-          }
+          if (toggleGrowRoam) toggleGrowRoam.checked = growPathMode === 'roam';
+          if (toggleGrowEntangled) toggleGrowEntangled.checked = growPathMode === 'entangled';
         };
-        if (btnGrowRoam) {
+        if (toggleGrowRoam) {
           syncGrowPathUi();
-          btnGrowRoam.addEventListener('click', () => {
-            growPathMode = growPathMode === 'roam' ? 'default' : 'roam';
-            syncGrowPathUi();
+          toggleGrowRoam.addEventListener('change', () => {
+            if (toggleGrowRoam.checked) {
+              growPathMode = 'roam';
+              if (toggleGrowEntangled) toggleGrowEntangled.checked = false;
+            } else if (growPathMode === 'roam') {
+              growPathMode = 'default';
+            }
           });
         }
-        if (btnGrowEntangled) {
+        if (toggleGrowEntangled) {
           syncGrowPathUi();
-          btnGrowEntangled.addEventListener('click', () => {
-            growPathMode = growPathMode === 'entangled' ? 'default' : 'entangled';
-            syncGrowPathUi();
+          toggleGrowEntangled.addEventListener('change', () => {
+            if (toggleGrowEntangled.checked) {
+              growPathMode = 'entangled';
+              if (toggleGrowRoam) toggleGrowRoam.checked = false;
+            } else if (growPathMode === 'entangled') {
+              growPathMode = 'default';
+            }
           });
         }
 
@@ -675,12 +702,12 @@ export function initForum(containerId, options = {}) {
         if (rebuildLogoIndex >= LOGO_COUNT) rebuildLogoIndex = -1;
       }
 
-      if (sketch.mouseIsPressed && mouseDownOnCanvas && isMouseOverCanvas() && interactionMode === 'stamp') {
+      if (sketch.mouseIsPressed && mouseDownOnCanvas && isMouseOverCanvas() && canStamp) {
         const moveSpeed = sketch.dist(sketch.mouseX, sketch.mouseY, sketch.pmouseX, sketch.pmouseY);
         stampSpacing = sketch.constrain(sketch.map(moveSpeed, 0, maxSpeed, minSpacing, maxSpacing), minSpacing, maxSpacing);
       }
 
-      if (interactionMode === 'grow') tickGrowths();
+      if (canGrow) tickGrowths();
 
       const scaleOsc = currentScaleOsc();
       const gradientAngle = currentGradientAngle();
@@ -701,7 +728,7 @@ export function initForum(containerId, options = {}) {
       if (!isMouseOverCanvas()) return;
       mouseDownOnCanvas = true;
 
-      if (interactionMode === 'grow') {
+      if (canGrow && !canStamp) {
         startGrowth(sketch.mouseX, sketch.mouseY);
         lastClickTime = Date.now();
         lastClickX = sketch.mouseX;
@@ -732,14 +759,24 @@ export function initForum(containerId, options = {}) {
         return;
       }
 
-      placeStamp();
-      lastClickTime = t;
-      lastClickX = sketch.mouseX;
-      lastClickY = sketch.mouseY;
+      if (canGrow && canStamp) {
+        startGrowth(sketch.mouseX, sketch.mouseY);
+        lastClickTime = t;
+        lastClickX = sketch.mouseX;
+        lastClickY = sketch.mouseY;
+        return;
+      }
+
+      if (canStamp) {
+        placeStamp();
+        lastClickTime = t;
+        lastClickX = sketch.mouseX;
+        lastClickY = sketch.mouseY;
+      }
     };
 
     sketch.mouseDragged = () => {
-      if (interactionMode === 'grow') return;
+      if (!canStamp) return;
       if (!mouseDownOnCanvas || !isMouseOverCanvas()) return;
       if (sketch.mouseButton === sketch.LEFT || sketch.mouseButton === sketch.RIGHT) {
         const scaleOsc = currentScaleOsc();
@@ -986,9 +1023,4 @@ export function initForum(containerId, options = {}) {
         String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + String(d.getSeconds()).padStart(2, '0');
     }
   }, containerId);
-}
-
-const container = document.getElementById('forum-canvas');
-if (container) {
-  initForum('forum-canvas', { preset: 'default', prefix: 'forum' });
 }

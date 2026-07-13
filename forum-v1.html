@@ -6,7 +6,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Datatype:wght@100..900&display=swap" rel="stylesheet">
-  <title>Forum – Dense</title>
+  <title>Forum verze 1</title>
   <link rel="stylesheet" href="/src/style.scss">
 </head>
 <body class="app-page forum-page">
@@ -18,14 +18,15 @@
             <li><a href="index.html">Rozložení loga</a></li>
             <li><a href="filhramonie.html">FilHRAmonie</a></li>
             <li><a href="testing.html">Testování</a></li>
-            <li><a href="forum.html">Forum</a></li>
-            <li><a href="forum-dense.html">Forum Dense</a></li>
+            <li><a href="forum-v1.html">Forum verze 1</a></li>
+            <li><a href="forum-v2.html">Forum verze 2</a></li>
+            <li><a href="forum-v3.html">Forum verze 3</a></li>
             <li><a href="sound-waves.html">Zvukové vlny</a></li>
           </ul>
         </nav>
         <div class="layout-sidebar-fill"></div>
         <div class="layout-sidebar-sep"></div>
-        <p class="forum-sidebar-hint">Klik: pomalý had razítek. Mezerník: logo | R: restart | P: PNG | S: SVG | +/-: velikost | Šipky ↑↓: oscilace | Šipky ←→: střed přechodu</p>
+        <p class="forum-sidebar-hint">Dvojklik bod A, pak klik bod B → rovnoměrná řada razítek. Mezerník: změna loga | R: restart | P: PNG | S: SVG | +/-: velikost | Šipky ↑↓: rychlost oscilace | Šipky ←→: střed přechodu</p>
       </div>
       <div class="layout-sidebar-col layout-sidebar-col--tools">
         <section class="forum-tools-section">
@@ -34,57 +35,48 @@
             <ul class="layout-palette-list">
               <li class="layout-palette-line">
                 <span class="layout-palette-label">Barva 1</span>
-                <div class="layout-palette-swatch" id="forum-dense-color1-swatch"></div>
+                <div class="layout-palette-swatch" id="forum-v1-color1-swatch"></div>
               </li>
               <li class="layout-palette-line">
                 <span class="layout-palette-label">Barva 2</span>
-                <div class="layout-palette-swatch" id="forum-dense-color2-swatch"></div>
+                <div class="layout-palette-swatch" id="forum-v1-color2-swatch"></div>
               </li>
               <li class="layout-palette-line layout-palette-line--buttons">
-                <button type="button" id="forum-dense-btn-save-palette">Uložit paletu</button>
-                <button type="button" id="forum-dense-btn-reset-palette">Obnovit</button>
+                <button type="button" id="forum-v1-btn-save-palette">Uložit paletu</button>
+                <button type="button" id="forum-v1-btn-reset-palette">Obnovit</button>
               </li>
             </ul>
           </div>
-          <button type="button" id="forum-dense-btn-color-mode">Barvy: gradient</button>
-        </section>
-        <div class="layout-sidebar-sep"></div>
-        <section class="forum-tools-section">
-          <p class="forum-tools-section-title">Růst</p>
-          <div class="forum-controls">
-            <button type="button" id="forum-dense-btn-grow-roam" aria-pressed="false">Přes plátno</button>
-            <button type="button" id="forum-dense-btn-grow-entangled" aria-pressed="false">Zamotaný</button>
-            <button type="button" id="forum-dense-btn-stop">Zastavit</button>
-          </div>
+          <button type="button" id="forum-v1-btn-color-mode">Barvy: gradient</button>
         </section>
         <div class="layout-sidebar-sep"></div>
         <section class="forum-tools-section">
           <p class="forum-tools-section-title">Plátno</p>
           <div class="forum-controls">
-            <label class="forum-toggle-a4"><input type="checkbox" id="forum-dense-toggle-a4" checked> Rám A4</label>
-            <button type="button" id="forum-dense-btn-logo">Změnit logo</button>
-            <button type="button" id="forum-dense-btn-restart">Restartovat</button>
+            <label class="forum-toggle-a4"><input type="checkbox" id="forum-v1-toggle-a4" checked> Rám A4</label>
+            <button type="button" id="forum-v1-btn-logo">Změnit logo</button>
+            <button type="button" id="forum-v1-btn-restart">Restartovat</button>
           </div>
         </section>
         <div class="layout-sidebar-sep"></div>
         <section class="forum-tools-section">
           <p class="forum-tools-section-title">Nastavení</p>
           <div class="forum-controls">
-            <label>Rychlost oscilace <input type="range" id="forum-dense-slider-osc" min="1" max="100" value="20"></label>
-            <label>Střed přechodu <input type="range" id="forum-dense-slider-grad" min="10" max="90" value="50"></label>
-            <label>Velikost <input type="range" id="forum-dense-slider-size" min="50" max="200" value="100"></label>
+            <label>Rychlost oscilace <input type="range" id="forum-v1-slider-osc" min="1" max="100" value="20"></label>
+            <label>Střed přechodu <input type="range" id="forum-v1-slider-grad" min="10" max="90" value="50"></label>
+            <label>Velikost <input type="range" id="forum-v1-slider-size" min="50" max="200" value="100"></label>
           </div>
         </section>
       </div>
     </aside>
     <main>
-      <div id="forum-dense-canvas"></div>
+      <div id="forum-v1-canvas"></div>
     </main>
   </div>
   <ul class="export-popup">
-    <li><button type="button" id="forum-dense-btn-png">Exportovat PNG</button></li>
-    <li><button type="button" id="forum-dense-btn-svg">Exportovat SVG</button></li>
+    <li><button type="button" id="forum-v1-btn-png">Exportovat PNG</button></li>
+    <li><button type="button" id="forum-v1-btn-svg">Exportovat SVG</button></li>
   </ul>
-  <script type="module" src="/src/forum-dense.js"></script>
+  <script type="module" src="/src/forum-v1.js"></script>
 </body>
 </html>
