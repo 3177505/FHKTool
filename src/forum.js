@@ -938,76 +938,31 @@ export function initForum(containerId, options = {}) {
       png.save(exportPrefix + '_' + timestamp() + '.png');
     }
 
-    function stampSolidHex(s) {
-      const pinkHex = s.color1 || p5ColorToHex(gradPink);
-      const blueHex = s.color2 || p5ColorToHex(gradBlue);
-      const pinkC = toColor(pinkHex);
-      const blueC = toColor(blueHex);
-      if (!pinkC || !blueC) return pinkHex;
-      return p5ColorToHex(sketch.lerpColor(pinkC, blueC, s.colorT ?? 0));
-    }
-
-    function stampGradientEndpoints(s, logo) {
-      const scaleVal = s.s * (s.sizeMult ?? sizeMultiplier);
-      const w = logo.width * scaleVal;
-      const h = logo.height * scaleVal;
-      const R = Math.sqrt(w * w + h * h) / 2 + 5;
-      const angle = s.gradientAngle ?? 0;
-      return {
-        x1: s.x - R * Math.cos(angle),
-        y1: s.y - R * Math.sin(angle),
-        x2: s.x + R * Math.cos(angle),
-        y2: s.y + R * Math.sin(angle),
-      };
+    function stampImageDataUrl(stamp, w, h) {
+      if (!stamp.baked) return null;
+      const iw = Math.max(1, Math.ceil(w));
+      const ih = Math.max(1, Math.ceil(h));
+      const g = sketch.createGraphics(iw, ih, sketch.P2D);
+      g.image(stamp.baked, 0, 0, iw, ih);
+      return g.elt.toDataURL('image/png');
     }
 
     function saveSvg() {
       let svg = '<?xml version="1.0" encoding="UTF-8"?>\n';
-      svg += `<svg width="${sketch.width}" height="${sketch.height}" xmlns="http://www.w3.org/2000/svg">\n`;
-      svg += '<rect width="100%" height="100%" fill="#ffffff"/>\n<defs>\n';
+      svg += `<svg width="${sketch.width}" height="${sketch.height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">\n`;
+      svg += '<rect width="100%" height="100%" fill="#ffffff"/>\n';
 
-      let gradIdx = 0;
       stamps.forEach(s => {
-        if (!logos[s.logoIdx] || !logoPathData[s.logoIdx]) return;
-        if (s.colorMode === 'morph') return;
+        if (!logos[s.logoIdx]) return;
         const logo = logos[s.logoIdx];
-        const pinkHex = s.color1 || p5ColorToHex(gradPink);
-        const blueHex = s.color2 || p5ColorToHex(gradBlue);
-        const pinkC = toColor(pinkHex);
-        const blueC = toColor(blueHex);
-        const { x1, y1, x2, y2 } = stampGradientEndpoints(s, logo);
-        const midHex = pinkC && blueC
-          ? p5ColorToHex(sketch.lerpColor(pinkC, blueC, 0.5))
-          : pinkHex;
-        const gc = sketch.constrain(s.gradCenter ?? gradientCenter, 0.01, 0.99);
-        svg += `  <linearGradient id="g${gradIdx}" gradientUnits="userSpaceOnUse" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}">\n`;
-        svg += `    <stop offset="0" stop-color="${pinkHex}"/>\n`;
-        svg += `    <stop offset="${gc.toFixed(3)}" stop-color="${midHex}"/>\n`;
-        svg += `    <stop offset="1" stop-color="${blueHex}"/>\n`;
-        svg += '  </linearGradient>\n';
-        gradIdx++;
-      });
-      svg += '</defs>\n';
-
-      gradIdx = 0;
-      stamps.forEach(s => {
-        if (!logos[s.logoIdx] || !logoPathData[s.logoIdx]) return;
-        const logo = logos[s.logoIdx];
-        const cx = s.x;
-        const cy = s.y;
-        const w = logo.width;
-        const h = logo.height;
         const scaleVal = s.s * (s.sizeMult ?? sizeMultiplier);
-        const tr = `translate(${cx.toFixed(2)},${cy.toFixed(2)}) scale(${scaleVal.toFixed(4)}) translate(${(-w/2).toFixed(2)},${(-h/2).toFixed(2)})`;
-        svg += `<g transform="${tr}">\n`;
-        const fillRef = s.colorMode === 'morph' ? stampSolidHex(s) : `url(#g${gradIdx})`;
-        if (s.colorMode !== 'morph') gradIdx++;
-        logoPathData[s.logoIdx].forEach(d => {
-          if (!d) return;
-          const dEsc = d.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          svg += `  <path d="${dEsc}" fill="${fillRef}"/>\n`;
-        });
-        svg += '</g>\n';
+        const w = logo.width * scaleVal;
+        const h = logo.height * scaleVal;
+        const dataUrl = stampImageDataUrl(s, w, h);
+        if (!dataUrl) return;
+        const x = (s.x - w / 2).toFixed(2);
+        const y = (s.y - h / 2).toFixed(2);
+        svg += `<image xlink:href="${dataUrl}" x="${x}" y="${y}" width="${w.toFixed(2)}" height="${h.toFixed(2)}"/>\n`;
       });
       svg += '</svg>';
 
