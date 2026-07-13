@@ -34,6 +34,9 @@ const FORUM_PRESETS = {
     growMinDurationMs: 20000,
     growMaxDurationMs: 40000,
     growEdgeSteer: 0.07,
+    growSharpTurnChance: 0.04,
+    growSharpTurnMin: 0.55,
+    growSharpTurnMax: 1.35,
   },
 };
 
@@ -66,6 +69,12 @@ const DOUBLE_CLICK_PIX = 15;
 const SIZE_STEP = 0.05;
 const SIZE_MIN = 0.5;
 const SIZE_MAX = 2;
+const OSC_SPEED_MIN = 0.002;
+const OSC_SPEED_MAX = 0.055;
+const OSC_SPEED_STEP_UP = 0.002;
+const OSC_SPEED_STEP_DOWN = 0.003;
+const OSC_SPEED_RANDOM_FROM = 0.004;
+const OSC_SPEED_RANDOM_TO = 0.032;
 
 export function initForum(containerId, options = {}) {
   const preset = FORUM_PRESETS[options.preset] || FORUM_PRESETS.default;
@@ -84,12 +93,13 @@ export function initForum(containerId, options = {}) {
   let minScale = preset.minScale;
   let maxScale = preset.maxScale;
   let oscSpeed;
-  let oscSpeedFrom = 0.01;
-  let oscSpeedTo = 0.2;
+  let oscSpeedFrom = OSC_SPEED_RANDOM_FROM;
+  let oscSpeedTo = OSC_SPEED_RANDOM_TO;
   let gradPink;
   let gradBlue;
   let gradientPhaseOffset;
   let gradientCenter = 0.5;
+  let colorMode = 'gradient';
   let sizeMultiplier = 1;
   let rebuildLogoIndex = -1;
   let lineStart = null;
@@ -114,6 +124,9 @@ export function initForum(containerId, options = {}) {
   const growMinDurationMs = preset.growMinDurationMs || 20000;
   const growMaxDurationMs = preset.growMaxDurationMs || 40000;
   const growEdgeSteer = preset.growEdgeSteer || 0.06;
+  const growSharpTurnChance = preset.growSharpTurnChance || 0;
+  const growSharpTurnMin = preset.growSharpTurnMin || 0.5;
+  const growSharpTurnMax = preset.growSharpTurnMax || 1.2;
   let activeGrowths = [];
   let mouseDownOnCanvas = false;
   let toColor;
@@ -146,6 +159,18 @@ export function initForum(containerId, options = {}) {
         logos[i] = sketch.loadImage(`${B}forum/${LOGO_SVG_NAMES[i]}`);
       }
     };
+
+    function clampOscSpeed(v) {
+      return sketch.constrain(v, OSC_SPEED_MIN, OSC_SPEED_MAX);
+    }
+
+    function oscToSlider(v) {
+      return Math.round(sketch.map(v, OSC_SPEED_MIN, OSC_SPEED_MAX, 1, 100));
+    }
+
+    function sliderToOsc(v) {
+      return clampOscSpeed(sketch.map(parseFloat(v), 1, 100, OSC_SPEED_MIN, OSC_SPEED_MAX));
+    }
 
     const doResize = () => {
       const oldW = sketch.width;
@@ -210,6 +235,23 @@ export function initForum(containerId, options = {}) {
         const sliderOsc = document.getElementById(elId('slider-osc'));
         const sliderGrad = document.getElementById(elId('slider-grad'));
         const sliderSize = document.getElementById(elId('slider-size'));
+        const btnColorMode = document.getElementById(elId('btn-color-mode'));
+        const gradCenterLabel = sliderGrad?.closest('label');
+
+        const syncColorModeUi = () => {
+          if (btnColorMode) {
+            btnColorMode.textContent = colorMode === 'morph' ? 'Barvy: přechod' : 'Barvy: gradient';
+          }
+          if (gradCenterLabel) gradCenterLabel.style.display = colorMode === 'morph' ? 'none' : '';
+        };
+
+        if (btnColorMode) {
+          syncColorModeUi();
+          btnColorMode.addEventListener('click', () => {
+            colorMode = colorMode === 'gradient' ? 'morph' : 'gradient';
+            syncColorModeUi();
+          });
+        }
 
         if (toggleA4) {
           toggleA4.checked = a4Frame;
@@ -272,16 +314,16 @@ export function initForum(containerId, options = {}) {
           currentLogoIndex = (currentLogoIndex + 1) % LOGO_COUNT;
           oscSpeed = sketch.random(oscSpeedFrom, oscSpeedTo);
           gradientPhaseOffset = sketch.random(sketch.TWO_PI);
-          if (sliderOsc) sliderOsc.value = Math.round(sketch.map(oscSpeed, 0.001, 1, 1, 100));
+          if (sliderOsc) sliderOsc.value = oscToSlider(oscSpeed);
         });
         if (btnRestart) btnRestart.addEventListener('click', restartCanvas);
         if (btnPng) btnPng.addEventListener('click', savePng);
         if (btnSvg) btnSvg.addEventListener('click', saveSvg);
 
         if (sliderOsc) {
-          sliderOsc.value = Math.round(sketch.map(oscSpeed, 0.001, 1, 1, 100));
+          sliderOsc.value = oscToSlider(oscSpeed);
           sliderOsc.addEventListener('input', () => {
-            oscSpeed = sketch.map(parseFloat(sliderOsc.value), 1, 100, 0.001, 1);
+            oscSpeed = sliderToOsc(sliderOsc.value);
           });
         }
         if (sliderGrad) {
@@ -403,14 +445,43 @@ export function initForum(containerId, options = {}) {
       return sketch.frameCount * oscSpeed + gradientPhaseOffset;
     }
 
+    function currentColorT() {
+      return sketch.map(sketch.sin(sketch.frameCount * oscSpeed + gradientPhaseOffset), -1, 1, 0, 1);
+    }
+
     function snapshotPrintStyle(gradientAngle) {
-      return {
+      const style = {
+        colorMode,
         color1: p5ColorToHex(gradPink),
         color2: p5ColorToHex(gradBlue),
         gradCenter: gradientCenter,
-        gradientAngle,
         sizeMult: sizeMultiplier,
       };
+      if (colorMode === 'morph') {
+        style.colorT = currentColorT();
+      } else {
+        style.gradientAngle = gradientAngle;
+      }
+      return style;
+    }
+
+    function bakeStampMorph(logoIdx, style) {
+      if (!logos[logoIdx] || !logoMasks[logoIdx]) return null;
+      const w = Math.max(1, Math.floor(logos[logoIdx].width));
+      const h = Math.max(1, Math.floor(logos[logoIdx].height));
+      const pink = toColor(style.color1) || gradPink;
+      const blue = toColor(style.color2) || gradBlue;
+      const solid = sketch.lerpColor(pink, blue, style.colorT ?? 0);
+      const buf = sketch.createGraphics(w, h, sketch.P2D);
+      buf.background(solid);
+      const img = buf.get(0, 0, buf.width, buf.height);
+      img.mask(logoMasks[logoIdx]);
+      return img;
+    }
+
+    function bakeStampVisual(logoIdx, style) {
+      if (style.colorMode === 'morph') return bakeStampMorph(logoIdx, style);
+      return bakeStampGradient(logoIdx, style);
     }
 
     function bakeStampGradient(logoIdx, style) {
@@ -451,7 +522,7 @@ export function initForum(containerId, options = {}) {
     function commitStamp(x, y, scaleOsc, logoIdx, gradientAngle) {
       if (!logos[logoIdx]) return null;
       const style = snapshotPrintStyle(gradientAngle);
-      const baked = bakeStampGradient(logoIdx, style);
+      const baked = bakeStampVisual(logoIdx, style);
       const effectiveScale = scaleOsc * style.sizeMult;
       const p = clampStampToCanvas(x, y, effectiveScale, logoIdx);
       const stamp = { x: p.x, y: p.y, s: scaleOsc, logoIdx, ...style, baked };
@@ -503,8 +574,10 @@ export function initForum(containerId, options = {}) {
         const dance = Math.sin(s.wigglePhase * 2.17 + 0.6) * growWiggleAmp * growWiggleHarmonic;
         s.heading += wiggle + dance;
 
-        if (sketch.random() < 0.015) {
-          s.heading += sketch.random(-0.06, 0.06);
+        if (growSharpTurnChance > 0 && sketch.random() < growSharpTurnChance) {
+          s.heading += (sketch.random() < 0.5 ? -1 : 1) * sketch.random(growSharpTurnMin, growSharpTurnMax);
+        } else if (sketch.random() < 0.01) {
+          s.heading += sketch.random(-0.04, 0.04);
         }
 
         steerSnakeFromEdges(s);
@@ -547,7 +620,11 @@ export function initForum(containerId, options = {}) {
       sketch.image(drawing, 0, 0);
       const effectiveScale = scaleOsc * sizeMultiplier;
       const p = clampStampToCanvas(sketch.mouseX, sketch.mouseY, effectiveScale, currentLogoIndex);
-      drawStampAt(sketch, p.x, p.y, scaleOsc, currentLogoIndex, gradientAngle);
+      if (colorMode === 'morph') {
+        drawMorphPreview(sketch, p.x, p.y, scaleOsc, currentLogoIndex);
+      } else {
+        drawStampAt(sketch, p.x, p.y, scaleOsc, currentLogoIndex, gradientAngle);
+      }
     };
 
     sketch.mousePressed = () => {
@@ -615,12 +692,10 @@ export function initForum(containerId, options = {}) {
         gradientPhaseOffset = sketch.random(sketch.TWO_PI);
       }
       if (sketch.keyCode === sketch.UP_ARROW) {
-        oscSpeed += 0.01;
-        oscSpeed = sketch.constrain(oscSpeed, 0.001, 1);
+        oscSpeed = clampOscSpeed(oscSpeed + OSC_SPEED_STEP_UP);
       }
       if (sketch.keyCode === sketch.DOWN_ARROW) {
-        oscSpeed -= 0.02;
-        oscSpeed = sketch.constrain(oscSpeed, 0.001, 1);
+        oscSpeed = clampOscSpeed(oscSpeed - OSC_SPEED_STEP_DOWN);
       }
       if (sketch.keyCode === sketch.LEFT_ARROW) {
         gradientCenter -= 0.1;
@@ -640,7 +715,7 @@ export function initForum(containerId, options = {}) {
 
       const sliderOsc = document.getElementById(elId('slider-osc'));
       const sliderGrad = document.getElementById(elId('slider-grad'));
-      if (sliderOsc) sliderOsc.value = Math.round(sketch.map(oscSpeed, 0.001, 1, 1, 100));
+      if (sliderOsc) sliderOsc.value = oscToSlider(oscSpeed);
       if (sliderGrad) sliderGrad.value = Math.round(gradientCenter * 100);
     };
 
@@ -700,6 +775,22 @@ export function initForum(containerId, options = {}) {
       drawStampAt(pg, p.x, p.y, stamp.s, stamp.logoIdx, stamp.gradientAngle);
     }
 
+    function drawMorphPreview(pg, cx, cy, s, logoIdx) {
+      if (!logos[logoIdx] || !logoMasks[logoIdx]) return;
+      const style = snapshotPrintStyle(0);
+      const baked = bakeStampMorph(logoIdx, style);
+      if (!baked) return;
+      const effectiveS = s * sizeMultiplier;
+      const logo = logos[logoIdx];
+      const p = clampStampToCanvas(cx, cy, effectiveS, logoIdx);
+      const w = logo.width * effectiveS;
+      const h = logo.height * effectiveS;
+      pg.push();
+      pg.translate(p.x, p.y);
+      pg.image(baked, -w / 2, -h / 2, w, h);
+      pg.pop();
+    }
+
     function drawStampAt(pg, cx, cy, s, logoIdx, gradientAngle) {
       if (!logos[logoIdx]) return;
       const effectiveS = s * sizeMultiplier;
@@ -749,9 +840,14 @@ export function initForum(containerId, options = {}) {
       let gradIdx = 0;
       stamps.forEach(s => {
         if (!logos[s.logoIdx] || !logoPathData[s.logoIdx]) return;
+        if (s.colorMode === 'morph') return;
         const logo = logos[s.logoIdx];
         const w = logo.width;
         const h = logo.height;
+        const pinkHex = s.color1 || p5ColorToHex(gradPink);
+        const blueHex = s.color2 || p5ColorToHex(gradBlue);
+        const pinkC = toColor(pinkHex);
+        const blueC = toColor(blueHex);
         const angle = s.gradientAngle;
         const R = Math.sqrt(w * w + h * h) / 2 + 5;
         const cx = w / 2;
@@ -760,10 +856,6 @@ export function initForum(containerId, options = {}) {
         const y1 = cy - R * Math.sin(angle);
         const x2 = cx + R * Math.cos(angle);
         const y2 = cy + R * Math.sin(angle);
-        const pinkHex = s.color1 || p5ColorToHex(gradPink);
-        const blueHex = s.color2 || p5ColorToHex(gradBlue);
-        const pinkC = toColor(pinkHex);
-        const blueC = toColor(blueHex);
         const midHex = pinkC && blueC
           ? p5ColorToHex(sketch.lerpColor(pinkC, blueC, 0.5))
           : pinkHex;
@@ -788,14 +880,25 @@ export function initForum(containerId, options = {}) {
         const scaleVal = s.s * (s.sizeMult ?? sizeMultiplier);
         const tr = `translate(${cx.toFixed(2)},${cy.toFixed(2)}) scale(${scaleVal.toFixed(4)}) translate(${(-w/2).toFixed(2)},${(-h/2).toFixed(2)})`;
         svg += `<g transform="${tr}">\n`;
-        const gradRef = `url(#g${gradIdx})`;
+        let fillRef;
+        if (s.colorMode === 'morph') {
+          const pinkHex = s.color1 || p5ColorToHex(gradPink);
+          const blueHex = s.color2 || p5ColorToHex(gradBlue);
+          const pinkC = toColor(pinkHex);
+          const blueC = toColor(blueHex);
+          fillRef = pinkC && blueC
+            ? p5ColorToHex(sketch.lerpColor(pinkC, blueC, s.colorT ?? 0))
+            : pinkHex;
+        } else {
+          fillRef = `url(#g${gradIdx})`;
+          gradIdx++;
+        }
         logoPathData[s.logoIdx].forEach(d => {
           if (!d) return;
           const dEsc = d.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          svg += `  <path d="${dEsc}" fill="${gradRef}"/>\n`;
+          svg += `  <path d="${dEsc}" fill="${fillRef}"/>\n`;
         });
         svg += '</g>\n';
-        gradIdx++;
       });
       svg += '</svg>';
 
