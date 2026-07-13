@@ -115,6 +115,7 @@ export function initForum(containerId, options = {}) {
   const growMaxDurationMs = preset.growMaxDurationMs || 40000;
   const growEdgeSteer = preset.growEdgeSteer || 0.06;
   let activeGrowths = [];
+  let mouseDownOnCanvas = false;
   let toColor;
   let p5ColorToHex;
 
@@ -380,6 +381,11 @@ export function initForum(containerId, options = {}) {
       }
     }
 
+    function isMouseOverCanvas() {
+      return sketch.mouseX >= 0 && sketch.mouseX <= sketch.width &&
+        sketch.mouseY >= 0 && sketch.mouseY <= sketch.height;
+    }
+
     function restartCanvas() {
       drawing.clear();
       drawing.background(255);
@@ -527,7 +533,7 @@ export function initForum(containerId, options = {}) {
         if (rebuildLogoIndex >= LOGO_COUNT) rebuildLogoIndex = -1;
       }
 
-      if (sketch.mouseIsPressed && interactionMode === 'stamp') {
+      if (sketch.mouseIsPressed && mouseDownOnCanvas && isMouseOverCanvas() && interactionMode === 'stamp') {
         const moveSpeed = sketch.dist(sketch.mouseX, sketch.mouseY, sketch.pmouseX, sketch.pmouseY);
         stampSpacing = sketch.constrain(sketch.map(moveSpeed, 0, maxSpeed, minSpacing, maxSpacing), minSpacing, maxSpacing);
       }
@@ -546,6 +552,8 @@ export function initForum(containerId, options = {}) {
 
     sketch.mousePressed = () => {
       if (sketch.mouseButton !== sketch.LEFT && sketch.mouseButton !== sketch.RIGHT) return;
+      if (!isMouseOverCanvas()) return;
+      mouseDownOnCanvas = true;
 
       if (interactionMode === 'grow') {
         startGrowth(sketch.mouseX, sketch.mouseY);
@@ -586,6 +594,7 @@ export function initForum(containerId, options = {}) {
 
     sketch.mouseDragged = () => {
       if (interactionMode === 'grow') return;
+      if (!mouseDownOnCanvas || !isMouseOverCanvas()) return;
       if (sketch.mouseButton === sketch.LEFT || sketch.mouseButton === sketch.RIGHT) {
         const scaleOsc = currentScaleOsc();
         const p = clampStampToCanvas(sketch.mouseX, sketch.mouseY, scaleOsc, currentLogoIndex);
@@ -593,6 +602,10 @@ export function initForum(containerId, options = {}) {
           placeStamp();
         }
       }
+    };
+
+    sketch.mouseReleased = () => {
+      mouseDownOnCanvas = false;
     };
 
     sketch.keyPressed = () => {
