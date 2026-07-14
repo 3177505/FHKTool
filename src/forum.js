@@ -84,11 +84,14 @@ function saveForumPaletteToStorage(hex1, hex2) {
   }
 }
 const PNG_EXPORT_SCALE = 2;
+const CANVAS_HISTORY_MAX = 20;
+const CANVAS_HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
 const LOGO_SVG_NAMES = ['forum.svg', 'forum1.svg', 'forum2.svg', 'forum3.svg', 'forum4.svg', 'forum5.svg', 'forum6.svg'];
 const LOGO_COUNT = 7;
 const GRADIENT_ANGLE_STEPS = 24;
 const DOUBLE_CLICK_MS = 400;
 const DOUBLE_CLICK_PIX = 15;
+const DRAG_THRESHOLD = 15;
 const SIZE_STEP = 0.05;
 const SIZE_MIN = 0.5;
 const SIZE_MAX = 2;
@@ -141,6 +144,7 @@ export function initForum(containerId, options = {}) {
   const interactionMode = preset.interactionMode || 'stamp';
   const canGrow = interactionMode === 'grow' || interactionMode === 'both';
   const canStamp = interactionMode === 'stamp' || interactionMode === 'both';
+  const isBothMode = interactionMode === 'both';
   const growStepLength = preset.growStepLength || 2;
   const growFramesPerStep = preset.growFramesPerStep || 3;
   const growWiggleAmp = preset.growWiggleAmp || 0.08;
@@ -155,6 +159,18 @@ export function initForum(containerId, options = {}) {
   const growSharpTurnMax = preset.growSharpTurnMax || 1.2;
   let activeGrowths = [];
   let mouseDownOnCanvas = false;
+  let actionStampBaseline = null;
+  let growthStartedThisPress = false;
+  let pressStartX = 0;
+  let pressStartY = 0;
+  let isDragStroke = false;
+  let suppressGrowthOnRelease = false;
+  let uiBlockCanvasUntilPointerUp = false;
+  let pendingGrowthTimer = null;
+  let canvasHistory = [[]];
+  let historyIndex = 0;
+  let historyBusy = false;
+  let canvasLoadingEl = null;
   let toColor;
   let p5ColorToHex;
 
@@ -248,13 +264,15 @@ export function initForum(containerId, options = {}) {
       loadLogoPathData().then(() => {
         buildLogoMasks();
         rebuildGradientMasked();
-        restartCanvas();
+        initCanvasHistory();
         wireControls();
       });
 
       function wireControls() {
         const btnLogo = document.getElementById(elId('btn-logo'));
         const btnRestart = document.getElementById(elId('btn-restart'));
+        const btnUndo = document.getElementById(elId('btn-undo'));
+        const btnRedo = document.getElementById(elId('btn-redo'));
         const btnStop = document.getElementById(elId('btn-stop'));
         const btnPng = document.getElementById(elId('btn-png'));
         const btnSvg = document.getElementById(elId('btn-svg'));
@@ -373,9 +391,18 @@ export function initForum(containerId, options = {}) {
           if (sliderOsc) sliderOsc.value = oscToSlider(oscSpeed);
         });
         if (btnRestart) btnRestart.addEventListener('click', restartCanvas);
-        if (btnStop) btnStop.addEventListener('click', stopAllGrowths);
-        if (btnPng) btnPng.addEventListener('click', savePng);
-        if (btnSvg) btnSvg.addEventListener('click', saveSvg);
+        if (btnUndo) btnUndo.addEventListener('click', undoCanvas);
+        if (btnRedo) btnRedo.addEventListener('click', redoCanvas);
+        if (btnStop) btnStop.addEventListener('click', () => stopAllGrowths(true));
+        if (btnPng) btnPng.addEventListener('click', () => {
+          cancelPendingGrowth();
+          savePng();
+        });
+        if (btnSvg) btnSvg.addEventListener('click', () => {
+          cancelPendingGrowth();
+          saveSvg();
+        });
+        wireUiPointerGuard();
 
         if (sliderOsc) {
           sliderOsc.value = oscToSlider(oscSpeed);
@@ -396,6 +423,7 @@ export function initForum(containerId, options = {}) {
             sizeMultiplier = parseFloat(sliderSize.value) / 100;
           });
         }
+        updateHistoryButtons();
       }
 
       sketch.windowResized = () => doResize();
@@ -485,17 +513,261 @@ export function initForum(containerId, options = {}) {
         sketch.mouseY >= 0 && sketch.mouseY <= sketch.height;
     }
 
-    function stopAllGrowths() {
+    function forumCanvasEl() {
+      return document.getElementById(containerId)?.querySelector('canvas') || sketch.canvas;
+    }
+
+    function isPointerOnCanvasElement() {
+      if (!isMouseOverCanvas()) return false;
+      const canvas = forumCanvasEl();
+      if (!canvas) return false;
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return false;
+      const clientX = rect.left + (sketch.mouseX / sketch.width) * rect.width;
+      const clientY = rect.top + (sketch.mouseY / sketch.height) * rect.height;
+      const el = document.elementFromPoint(clientX, clientY);
+      if (!el) return false;
+      return el === canvas || canvas.contains(el);
+    }
+
+    function wireUiPointerGuard() {
+      document.addEventListener('pointerdown', (e) => {
+        const canvas = forumCanvasEl();
+        if (canvas && (e.target === canvas || canvas.contains(e.target))) return;
+        if (e.target.closest('.export-popup, .layout-sidebar, .top-right, button, label, input, select, textarea, a')) {
+          uiBlockCanvasUntilPointerUp = true;
+          cancelPendingGrowth();
+          mouseDownOnCanvas = false;
+          suppressGrowthOnRelease = true;
+        }
+      }, true);
+      const clearUiBlock = () => {
+        uiBlockCanvasUntilPointerUp = false;
+      };
+      window.addEventListener('pointerup', clearUiBlock, true);
+      window.addEventListener('pointercancel', clearUiBlock, true);
+    }
+
+    function historyStorageKey() {
+      return `forum-canvas-history-${exportPrefix}`;
+    }
+
+    function serializeStamp(s) {
+      return {
+        x: s.x,
+        y: s.y,
+        s: s.s,
+        logoIdx: s.logoIdx,
+        colorMode: s.colorMode,
+        color1: s.color1,
+        color2: s.color2,
+        gradCenter: s.gradCenter,
+        sizeMult: s.sizeMult,
+        gradientAngle: s.gradientAngle,
+        colorT: s.colorT,
+      };
+    }
+
+    function stampFromSerialized(data) {
+      const style = {
+        colorMode: data.colorMode,
+        color1: data.color1,
+        color2: data.color2,
+        gradCenter: data.gradCenter,
+        sizeMult: data.sizeMult,
+        gradientAngle: data.gradientAngle,
+        colorT: data.colorT,
+      };
+      const baked = bakeStampVisual(data.logoIdx, style);
+      return { ...data, ...style, baked };
+    }
+
+    function yieldToUi() {
+      return new Promise(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
+    }
+
+    function deserializeStampsAsync(data) {
+      if (!Array.isArray(data) || data.length === 0) return Promise.resolve([]);
+      const batchSize = 10;
+      const out = new Array(data.length);
+      let i = 0;
+      return new Promise(resolve => {
+        const tick = () => {
+          const end = Math.min(i + batchSize, data.length);
+          for (; i < end; i++) out[i] = stampFromSerialized(data[i]);
+          if (i < data.length) requestAnimationFrame(tick);
+          else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      });
+    }
+
+    function ensureHistoryStatusEl() {
+      let status = document.getElementById(elId('history-status'));
+      if (status) return status;
+      const btnRedo = document.getElementById(elId('btn-redo'));
+      if (!btnRedo?.parentElement) return null;
+      status = document.createElement('span');
+      status.id = elId('history-status');
+      status.className = 'forum-history-status';
+      status.hidden = true;
+      status.textContent = 'Načítá se…';
+      btnRedo.insertAdjacentElement('afterend', status);
+      return status;
+    }
+
+    function ensureLoadingUi() {
+      ensureHistoryStatusEl();
+      if (canvasLoadingEl) return;
+      const el = document.getElementById(containerId);
+      const main = el?.closest('main');
+      if (!main) return;
+      canvasLoadingEl = document.createElement('div');
+      canvasLoadingEl.className = 'forum-canvas-loading';
+      canvasLoadingEl.hidden = true;
+      canvasLoadingEl.textContent = 'Načítá se…';
+      main.appendChild(canvasLoadingEl);
+    }
+
+    function setHistoryLoading(active) {
+      historyBusy = active;
+      ensureLoadingUi();
+      const btnUndo = document.getElementById(elId('btn-undo'));
+      const btnRedo = document.getElementById(elId('btn-redo'));
+      const btnRestart = document.getElementById(elId('btn-restart'));
+      const status = document.getElementById(elId('history-status'));
+      if (btnUndo) btnUndo.disabled = active || historyIndex <= 0;
+      if (btnRedo) btnRedo.disabled = active || historyIndex >= canvasHistory.length - 1;
+      if (btnRestart) btnRestart.disabled = active;
+      if (status) status.hidden = !active;
+      if (canvasLoadingEl) canvasLoadingEl.hidden = !active;
+      const cnv = document.getElementById(containerId);
+      if (cnv) cnv.classList.toggle('forum-canvas-inactive', active);
+    }
+
+    function redrawFromStamps() {
+      drawing.clear();
+      drawing.background(255);
+      stamps.forEach(s => drawStampFromStamp(drawing, s));
+    }
+
+    function updateHistoryButtons() {
+      const btnUndo = document.getElementById(elId('btn-undo'));
+      const btnRedo = document.getElementById(elId('btn-redo'));
+      const btnRestart = document.getElementById(elId('btn-restart'));
+      if (btnUndo) btnUndo.disabled = historyBusy || historyIndex <= 0;
+      if (btnRedo) btnRedo.disabled = historyBusy || historyIndex >= canvasHistory.length - 1;
+      if (btnRestart) btnRestart.disabled = historyBusy;
+    }
+
+    function parseCanvasHistoryFromStorage() {
+      try {
+        const raw = localStorage.getItem(historyStorageKey());
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (!data || Date.now() - (data.savedAt || 0) > CANVAS_HISTORY_TTL_MS) {
+          localStorage.removeItem(historyStorageKey());
+          return null;
+        }
+        if (!Array.isArray(data.snapshots) || data.snapshots.length === 0) return null;
+        return {
+          snapshots: data.snapshots,
+          index: sketch.constrain(data.index ?? data.snapshots.length - 1, 0, data.snapshots.length - 1),
+        };
+      } catch {
+        return null;
+      }
+    }
+
+    function persistCanvasHistory() {
+      try {
+        localStorage.setItem(historyStorageKey(), JSON.stringify({
+          savedAt: Date.now(),
+          index: historyIndex,
+          snapshots: canvasHistory,
+        }));
+      } catch (e) {
+        console.warn('Failed to save canvas history:', e);
+      }
+    }
+
+    async function initCanvasHistory() {
+      ensureLoadingUi();
+      const parsed = parseCanvasHistoryFromStorage();
+      if (parsed) {
+        canvasHistory = parsed.snapshots;
+        historyIndex = parsed.index;
+        await applyHistoryIndex(historyIndex, { skipStop: true });
+        return;
+      }
+      canvasHistory = [[]];
+      historyIndex = 0;
+      stamps = [];
+      redrawFromStamps();
+      updateHistoryButtons();
+    }
+
+    function pushHistoryCheckpoint() {
+      if (historyBusy) return;
+      canvasHistory = canvasHistory.slice(0, historyIndex + 1);
+      canvasHistory.push(stamps.map(serializeStamp));
+      if (canvasHistory.length > CANVAS_HISTORY_MAX) {
+        canvasHistory.shift();
+      } else {
+        historyIndex++;
+      }
+      persistCanvasHistory();
+      updateHistoryButtons();
+    }
+
+    async function applyHistoryIndex(idx, options = {}) {
+      if (historyBusy) return;
+      cancelPendingGrowth();
+      setHistoryLoading(true);
+      await yieldToUi();
+
+      if (!options.skipStop) stopAllGrowths();
+      historyIndex = idx;
+      stamps = await deserializeStampsAsync(canvasHistory[historyIndex]);
+      lastStampPos = { x: -9999, y: -9999 };
+      lineStart = null;
+      redrawFromStamps();
+      setHistoryLoading(false);
+      updateHistoryButtons();
+    }
+
+    async function undoCanvas() {
+      if (historyBusy || historyIndex <= 0) return;
+      await applyHistoryIndex(historyIndex - 1);
+    }
+
+    async function redoCanvas() {
+      if (historyBusy || historyIndex >= canvasHistory.length - 1) return;
+      await applyHistoryIndex(historyIndex + 1);
+    }
+
+    function stopAllGrowths(savePartial = false) {
+      let shouldPush = false;
+      if (savePartial) {
+        for (const s of activeGrowths) {
+          if (stamps.length > s.historyMark) shouldPush = true;
+        }
+      }
       activeGrowths = [];
+      if (shouldPush) pushHistoryCheckpoint();
     }
 
     function restartCanvas() {
-      drawing.clear();
-      drawing.background(255);
+      if (historyBusy) return;
+      cancelPendingGrowth();
+      stopAllGrowths();
       stamps = [];
       lastStampPos = { x: -9999, y: -9999 };
       lineStart = null;
-      activeGrowths = [];
+      redrawFromStamps();
+      pushHistoryCheckpoint();
     }
 
     function currentScaleOsc() {
@@ -592,7 +864,24 @@ export function initForum(containerId, options = {}) {
       return p;
     }
 
+    function cancelPendingGrowth() {
+      if (pendingGrowthTimer) {
+        clearTimeout(pendingGrowthTimer);
+        pendingGrowthTimer = null;
+      }
+    }
+
+    function schedulePendingGrowth(x, y) {
+      cancelPendingGrowth();
+      pendingGrowthTimer = setTimeout(() => {
+        pendingGrowthTimer = null;
+        startGrowth(x, y);
+      }, DOUBLE_CLICK_MS);
+    }
+
     function startGrowth(x, y) {
+      growthStartedThisPress = true;
+      const historyMark = stamps.length;
       const heading = sketch.random(sketch.TWO_PI);
       const seedScale = sketch.lerp(minScale, maxScale, 0.5);
       commitStamp(x, y, seedScale, currentLogoIndex, currentGradientAngle() + heading);
@@ -605,6 +894,7 @@ export function initForum(containerId, options = {}) {
         wiggleFreq: growWiggleFreq * sketch.random(0.85, 1.15),
         endTime: Date.now() + sketch.random(growMinDurationMs, growMaxDurationMs),
         age: 0,
+        historyMark,
       });
     }
 
@@ -689,7 +979,10 @@ export function initForum(containerId, options = {}) {
         const scaleOsc = sketch.lerp(minScale, maxScale, 0.5 + 0.5 * Math.sin(s.wigglePhase * 1.3));
         commitStamp(px, py, scaleOsc, s.logoIdx, currentGradientAngle() + s.heading);
 
-        if (Date.now() >= s.endTime) activeGrowths.splice(gi, 1);
+        if (Date.now() >= s.endTime) {
+          if (stamps.length > s.historyMark) pushHistoryCheckpoint();
+          activeGrowths.splice(gi, 1);
+        }
       }
     }
 
@@ -724,9 +1017,16 @@ export function initForum(containerId, options = {}) {
     };
 
     sketch.mousePressed = () => {
+      if (historyBusy || uiBlockCanvasUntilPointerUp) return;
       if (sketch.mouseButton !== sketch.LEFT && sketch.mouseButton !== sketch.RIGHT) return;
-      if (!isMouseOverCanvas()) return;
+      if (!isPointerOnCanvasElement()) return;
       mouseDownOnCanvas = true;
+      actionStampBaseline = stamps.length;
+      growthStartedThisPress = false;
+      pressStartX = sketch.mouseX;
+      pressStartY = sketch.mouseY;
+      isDragStroke = false;
+      suppressGrowthOnRelease = false;
 
       if (canGrow && !canStamp) {
         startGrowth(sketch.mouseX, sketch.mouseY);
@@ -741,6 +1041,8 @@ export function initForum(containerId, options = {}) {
         sketch.dist(sketch.mouseX, sketch.mouseY, lastClickX, lastClickY) < DOUBLE_CLICK_PIX;
 
       if (isDoubleClick) {
+        cancelPendingGrowth();
+        suppressGrowthOnRelease = true;
         lineStart = { x: sketch.mouseX, y: sketch.mouseY };
         lineStartScale = sketch.map(sketch.sin(sketch.frameCount * oscSpeed), -1, 1, minScale, maxScale);
         lineStartGradientAngle = sketch.frameCount * oscSpeed + gradientPhaseOffset;
@@ -751,16 +1053,18 @@ export function initForum(containerId, options = {}) {
       }
 
       if (lineStart) {
+        cancelPendingGrowth();
+        suppressGrowthOnRelease = true;
         placeStampsAlongLine(lineStart, { x: sketch.mouseX, y: sketch.mouseY }, lineStartScale, lineStartGradientAngle);
         lineStart = null;
+        pushHistoryCheckpoint();
         lastClickTime = t;
         lastClickX = sketch.mouseX;
         lastClickY = sketch.mouseY;
         return;
       }
 
-      if (canGrow && canStamp) {
-        startGrowth(sketch.mouseX, sketch.mouseY);
+      if (isBothMode) {
         lastClickTime = t;
         lastClickX = sketch.mouseX;
         lastClickY = sketch.mouseY;
@@ -776,8 +1080,19 @@ export function initForum(containerId, options = {}) {
     };
 
     sketch.mouseDragged = () => {
+      if (historyBusy || uiBlockCanvasUntilPointerUp) return;
       if (!canStamp) return;
-      if (!mouseDownOnCanvas || !isMouseOverCanvas()) return;
+      if (!mouseDownOnCanvas || !isPointerOnCanvasElement()) return;
+
+      if (isBothMode) {
+        if (!isDragStroke && sketch.dist(sketch.mouseX, sketch.mouseY, pressStartX, pressStartY) >= DRAG_THRESHOLD) {
+          isDragStroke = true;
+          cancelPendingGrowth();
+          lastStampPos = { x: pressStartX, y: pressStartY };
+        }
+        if (!isDragStroke) return;
+      }
+
       if (sketch.mouseButton === sketch.LEFT || sketch.mouseButton === sketch.RIGHT) {
         const scaleOsc = currentScaleOsc();
         const p = clampStampToCanvas(sketch.mouseX, sketch.mouseY, scaleOsc, currentLogoIndex);
@@ -788,10 +1103,40 @@ export function initForum(containerId, options = {}) {
     };
 
     sketch.mouseReleased = () => {
+      if (uiBlockCanvasUntilPointerUp) {
+        mouseDownOnCanvas = false;
+        actionStampBaseline = null;
+        growthStartedThisPress = false;
+        isDragStroke = false;
+        suppressGrowthOnRelease = false;
+        return;
+      }
+      if (isBothMode && mouseDownOnCanvas) {
+        if (isDragStroke) {
+          if (stamps.length > actionStampBaseline) pushHistoryCheckpoint();
+        } else if (!suppressGrowthOnRelease && !lineStart) {
+          schedulePendingGrowth(pressStartX, pressStartY);
+        }
+      } else if (mouseDownOnCanvas && canStamp && !growthStartedThisPress) {
+        if (actionStampBaseline !== null && stamps.length > actionStampBaseline) {
+          pushHistoryCheckpoint();
+        }
+      }
       mouseDownOnCanvas = false;
+      actionStampBaseline = null;
+      growthStartedThisPress = false;
+      isDragStroke = false;
+      suppressGrowthOnRelease = false;
     };
 
     sketch.keyPressed = () => {
+      if (historyBusy) return false;
+      const mod = sketch.metaKey || sketch.ctrlKey;
+      if (mod && (sketch.key === 'z' || sketch.key === 'Z')) {
+        if (sketch.shiftKey) redoCanvas();
+        else undoCanvas();
+        return false;
+      }
       if (sketch.key === ' ' || sketch.key === '\t') {
         currentLogoIndex = (currentLogoIndex + 1) % LOGO_COUNT;
         oscSpeed = sketch.random(oscSpeedFrom, oscSpeedTo);
@@ -938,31 +1283,97 @@ export function initForum(containerId, options = {}) {
       png.save(exportPrefix + '_' + timestamp() + '.png');
     }
 
-    function stampImageDataUrl(stamp, w, h) {
-      if (!stamp.baked) return null;
-      const iw = Math.max(1, Math.ceil(w));
-      const ih = Math.max(1, Math.ceil(h));
-      const g = sketch.createGraphics(iw, ih, sketch.P2D);
-      g.image(stamp.baked, 0, 0, iw, ih);
-      return g.elt.toDataURL('image/png');
+    function stampQuantizedAngle(stamp) {
+      let a = (stamp.gradientAngle ?? 0) % sketch.TWO_PI;
+      if (a < 0) a += sketch.TWO_PI;
+      return Math.round(a / (sketch.TWO_PI / GRADIENT_ANGLE_STEPS)) * sketch.TWO_PI / GRADIENT_ANGLE_STEPS;
+    }
+
+    function stampGradientT(p, gc) {
+      let t;
+      if (gc <= 0.001) t = 1;
+      else if (gc >= 0.999) t = 0;
+      else if (p <= gc) t = 0.5 * p / gc;
+      else t = 0.5 + 0.5 * (p - gc) / (1 - gc);
+      return sketch.constrain(t, 0, 1);
+    }
+
+    function stampStyleColors(stamp) {
+      return {
+        pink: toColor(stamp.color1) || gradPink,
+        blue: toColor(stamp.color2) || gradBlue,
+        gc: sketch.constrain(stamp.gradCenter ?? gradientCenter, 0.001, 0.999),
+      };
+    }
+
+    function svgRgbFromColor(c) {
+      return `rgb(${sketch.red(c)},${sketch.green(c)},${sketch.blue(c)})`;
+    }
+
+    function stampGradientEndpoints(stamp, logo) {
+      const w = logo.width;
+      const h = logo.height;
+      const R = Math.sqrt(w * w + h * h) / 2 + 2;
+      const a = stampQuantizedAngle(stamp);
+      const cx = w / 2;
+      const cy = h / 2;
+      return {
+        x1: cx + R * Math.sin(a),
+        y1: cy - R * Math.cos(a),
+        x2: cx - R * Math.sin(a),
+        y2: cy + R * Math.cos(a),
+      };
+    }
+
+    function stampGradientStopLines(stamp) {
+      const { pink, blue, gc } = stampStyleColors(stamp);
+      const steps = 64;
+      const lines = [];
+      for (let i = 0; i <= steps; i++) {
+        const p = i / steps;
+        const t = stampGradientT(p, gc);
+        lines.push(`      <stop offset="${(p * 100).toFixed(2)}%" stop-color="${svgRgbFromColor(sketch.lerpColor(pink, blue, t))}"/>`);
+      }
+      return lines.join('\n');
+    }
+
+    function stampMorphFill(stamp) {
+      const { pink, blue } = stampStyleColors(stamp);
+      return svgRgbFromColor(sketch.lerpColor(pink, blue, stamp.colorT ?? 0));
     }
 
     function saveSvg() {
       let svg = '<?xml version="1.0" encoding="UTF-8"?>\n';
-      svg += `<svg width="${sketch.width}" height="${sketch.height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">\n`;
+      svg += `<svg width="${sketch.width}" height="${sketch.height}" xmlns="http://www.w3.org/2000/svg">\n`;
       svg += '<rect width="100%" height="100%" fill="#ffffff"/>\n';
 
-      stamps.forEach(s => {
-        if (!logos[s.logoIdx]) return;
+      stamps.forEach((s, idx) => {
+        if (!logos[s.logoIdx] || !logoPathData[s.logoIdx]) return;
         const logo = logos[s.logoIdx];
+        const w = logo.width;
+        const h = logo.height;
         const scaleVal = s.s * (s.sizeMult ?? sizeMultiplier);
-        const w = logo.width * scaleVal;
-        const h = logo.height * scaleVal;
-        const dataUrl = stampImageDataUrl(s, w, h);
-        if (!dataUrl) return;
-        const x = (s.x - w / 2).toFixed(2);
-        const y = (s.y - h / 2).toFixed(2);
-        svg += `<image xlink:href="${dataUrl}" x="${x}" y="${y}" width="${w.toFixed(2)}" height="${h.toFixed(2)}"/>\n`;
+        const tr = `translate(${s.x.toFixed(2)},${s.y.toFixed(2)}) scale(${scaleVal.toFixed(4)}) translate(${(-w / 2).toFixed(2)},${(-h / 2).toFixed(2)})`;
+        const gradId = `forum-grad-${idx}`;
+        let fillRef;
+
+        svg += `<g transform="${tr}">\n`;
+        if (s.colorMode === 'morph') {
+          fillRef = stampMorphFill(s);
+        } else {
+          const { x1, y1, x2, y2 } = stampGradientEndpoints(s, logo);
+          svg += `  <defs><linearGradient id="${gradId}" gradientUnits="userSpaceOnUse" color-interpolation="sRGB" spreadMethod="pad" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}">\n`;
+          svg += stampGradientStopLines(s);
+          svg += `\n    </linearGradient></defs>\n`;
+          fillRef = `url(#${gradId})`;
+        }
+
+        logoPathData[s.logoIdx].forEach(d => {
+          if (!d) return;
+          const dEsc = d.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          svg += `  <path d="${dEsc}" fill="${fillRef}" stroke="none"/>\n`;
+        });
+        svg += '</g>\n';
       });
       svg += '</svg>';
 

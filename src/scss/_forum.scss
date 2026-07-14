@@ -75,6 +75,33 @@ body.forum-page .layout-workspace > main {
   justify-content: center;
   align-items: center;
   overflow: hidden;
+  position: relative;
+}
+
+.forum-history-status {
+  margin: 0;
+  color: $color-primary;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.forum-canvas-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba($color-page-bg, 0.72);
+  color: $color-page-text;
+  pointer-events: all;
+  cursor: wait;
+
+  &[hidden] {
+    display: none;
+  }
 }
 
 #forum-v1-canvas,
@@ -88,6 +115,10 @@ body.forum-page .layout-workspace > main {
   aspect-ratio: 1 / 1.414;
   overflow: hidden;
   border: 1px solid $color-primary;
+
+  &.forum-canvas-inactive {
+    pointer-events: none;
+  }
 
   canvas {
     display: block;
