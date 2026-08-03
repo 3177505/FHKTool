@@ -461,9 +461,12 @@ function singleGapOutlineDash(path, layerNum, state, strokePx) {
 function resetSvgTextureFill(svgEl) {
   const defs = svgEl.querySelector('defs');
   if (defs) defs.querySelectorAll('[data-texfill="1"]').forEach((n) => n.remove());
+  svgEl.querySelectorAll('path[data-tex-bitmap-mul="1"]').forEach((n) => n.remove());
   svgEl.querySelectorAll('path[data-tex-orig-fill]').forEach((path) => {
     path.setAttribute('fill', path.getAttribute('data-tex-orig-fill') || '#000000');
     path.removeAttribute('data-tex-orig-fill');
+    path.removeAttribute('data-tex-bitmap-mul-base');
+    path.removeAttribute('style');
   });
 }
 
@@ -534,6 +537,7 @@ function applyPathOutlinesToPaths(paths, layerRgb, state, layerNum) {
   const randomGaps = !!state.pathOutlineRandomGaps;
   paths.forEach((path) => {
     if (path.getAttribute('data-tex-outline-clone') === '1') return;
+    if (path.getAttribute('data-tex-bitmap-mul') === '1') return;
     const [sr, sg, sb] = pathStrokeRgbFromShapeFill(path, layerRgb);
     const strokeCol = `rgb(${sr},${sg},${sb})`;
     if (!path.hasAttribute('data-tex-outline-base')) {
@@ -625,8 +629,13 @@ function syncLayerCssSpanOutline(layerEl, state, layerNum) {
 function texturePatternKindResolved(raw) {
   const k = String(raw || 'stripes');
   if (k === 'bitmap') return 'bitmap';
+  if (k === 'bitmapshape') return 'bitmapshape';
   if (k === 'dothatch') return 'dothatch';
   return 'stripes';
+}
+
+function isBitmapTextureKind(k) {
+  return k === 'bitmap' || k === 'bitmapshape';
 }
 
 function textureFillOptsForLayer(state, layerNum) {
@@ -705,7 +714,10 @@ function texturePatternOptsForLayer(state, layerNum) {
       bitmapUrl: state.texturePatternBitmapUrl1 || '',
       bitmapSvgText: state.texturePatternBitmapSvgText1 || '',
       bitmapScale: Number(state.texturePatternBitmapScale1) || 100,
-      bitmapPerShape: !!state.texturePatternBitmapPerShape1
+      bitmapNaturalWidth: Number(state.texturePatternBitmapNaturalWidth1) || 0,
+      bitmapNaturalHeight: Number(state.texturePatternBitmapNaturalHeight1) || 0,
+      bitmapFit: state.texturePatternBitmapFit1 === 'cover' ? 'cover' : 'contain',
+      bitmapMultiply: !!state.texturePatternBitmapMultiply1
     };
   }
   return {
@@ -720,7 +732,10 @@ function texturePatternOptsForLayer(state, layerNum) {
     bitmapUrl: state.texturePatternBitmapUrl2 || '',
     bitmapSvgText: state.texturePatternBitmapSvgText2 || '',
     bitmapScale: Number(state.texturePatternBitmapScale2) || 100,
-    bitmapPerShape: !!state.texturePatternBitmapPerShape2
+    bitmapNaturalWidth: Number(state.texturePatternBitmapNaturalWidth2) || 0,
+    bitmapNaturalHeight: Number(state.texturePatternBitmapNaturalHeight2) || 0,
+    bitmapFit: state.texturePatternBitmapFit2 === 'cover' ? 'cover' : 'contain',
+    bitmapMultiply: !!state.texturePatternBitmapMultiply2
   };
 }
 
@@ -733,7 +748,7 @@ function textureGradientActiveForLayer(state, layerNum) {
 function layerPatternShouldApply(state, layerNum) {
   const pat = texturePatternOptsForLayer(state, layerNum);
   if (!pat.enabled) return false;
-  if (pat.kind === 'bitmap') return !!(pat.bitmapUrl || pat.bitmapSvgText);
+  if (isBitmapTextureKind(pat.kind)) return !!(pat.bitmapUrl || pat.bitmapSvgText);
   if (pat.kind === 'dothatch') return true;
   return true;
 }
@@ -904,42 +919,102 @@ function applyGradientWithWaveDotsToSvgPaths(defs, paths, fillOpts, amount, pat,
   });
 }
 
+function probeBitmapTextureSize(url) {
+  return new Promise((resolve) => {
+    if (!url) {
+      resolve({ w: 0, h: 0 });
+      return;
+    }
+    const im = new Image();
+    im.onload = () => resolve({ w: im.naturalWidth || 0, h: im.naturalHeight || 0 });
+    im.onerror = () => resolve({ w: 0, h: 0 });
+    im.src = url;
+  });
+}
+
+function fitRectInBBox(bb, imgW, imgH, fit) {
+  const cover = fit === 'cover';
+  if (!(imgW > 0) || !(imgH > 0) || !(bb.width > 0) || !(bb.height > 0)) {
+    return { x: bb.x, y: bb.y, width: bb.width, height: bb.height, meet: !cover };
+  }
+  const s = cover ? Math.max(bb.width / imgW, bb.height / imgH) : Math.min(bb.width / imgW, bb.height / imgH);
+  const width = imgW * s;
+  const height = imgH * s;
+  return {
+    x: bb.x + (bb.width - width) / 2,
+    y: bb.y + (bb.height - height) / 2,
+    width,
+    height,
+    meet: false
+  };
+}
+
 function applyBitmapPatternToSvgPaths(defs, paths, pat) {
   const doc = defs.ownerDocument || document;
   const sc = Math.max(0.25, Math.min(4, (Number(pat.bitmapScale) || 100) / 100));
   const w = Math.round(96 * sc);
   const h = Math.round(96 * sc);
-  if (pat.bitmapPerShape) {
-    const iw = 1 / sc;
-    const io = (1 - iw) / 2;
-    paths.forEach((path) => {
+  if (pat.kind === 'bitmapshape') {
+    const href = pat.bitmapUrl || '';
+    const imgW = Number(pat.bitmapNaturalWidth) || 0;
+    const imgH = Number(pat.bitmapNaturalHeight) || 0;
+    const fit = pat.bitmapFit === 'cover' ? 'cover' : 'contain';
+    const multiply = !!pat.bitmapMultiply;
+    Array.from(paths || []).forEach((path) => {
+      if (path.getAttribute('data-tex-bitmap-mul') === '1') return;
       const rawFill = path.getAttribute('fill') || '#000000';
       if (rawFill.includes('url(')) return;
+      let bb;
+      try {
+        bb = path.getBBox();
+      } catch {
+        return;
+      }
+      if (!bb || !(bb.width > 0) || !(bb.height > 0) || !href) return;
       path.setAttribute('data-tex-orig-fill', rawFill);
+      const place = fitRectInBBox(bb, imgW, imgH, fit);
+      const cx = bb.x + bb.width / 2;
+      const cy = bb.y + bb.height / 2;
       const patId = `texpat-${++textureRadialIdSeq}`;
       const p = doc.createElementNS(SVG_NS, 'pattern');
       p.setAttribute('id', patId);
       p.setAttribute('patternUnits', 'objectBoundingBox');
-      p.setAttribute('patternContentUnits', 'objectBoundingBox');
       p.setAttribute('width', '1');
       p.setAttribute('height', '1');
-      p.setAttribute('patternTransform', 'translate(0,1) scale(1,-1)');
+      p.setAttribute('viewBox', `${bb.x} ${bb.y} ${bb.width} ${bb.height}`);
+      p.setAttribute('preserveAspectRatio', 'none');
       p.setAttribute('data-texfill', '1');
-      if (pat.bitmapSvgText) {
-        importSvgTextureIntoPattern(doc, p, pat.bitmapSvgText, 1, 1, true);
-      } else {
-        const img = doc.createElementNS(SVG_NS, 'image');
-        img.setAttribute('href', pat.bitmapUrl);
-        img.setAttributeNS(XLINK_NS, 'xlink:href', pat.bitmapUrl);
-        img.setAttribute('x', String(io));
-        img.setAttribute('y', String(io));
-        img.setAttribute('width', String(iw));
-        img.setAttribute('height', String(iw));
-        img.setAttribute('preserveAspectRatio', 'xMidYMid slice');
-        p.appendChild(img);
+      if (!multiply) {
+        const bg = doc.createElementNS(SVG_NS, 'rect');
+        bg.setAttribute('x', String(bb.x));
+        bg.setAttribute('y', String(bb.y));
+        bg.setAttribute('width', String(bb.width));
+        bg.setAttribute('height', String(bb.height));
+        bg.setAttribute('fill', rawFill);
+        p.appendChild(bg);
       }
+      const img = doc.createElementNS(SVG_NS, 'image');
+      img.setAttribute('href', href);
+      img.setAttributeNS(XLINK_NS, 'xlink:href', href);
+      img.setAttribute('x', String(place.x));
+      img.setAttribute('y', String(place.y));
+      img.setAttribute('width', String(place.width));
+      img.setAttribute('height', String(place.height));
+      img.setAttribute(
+        'preserveAspectRatio',
+        place.meet ? (fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet') : 'none'
+      );
+      img.setAttribute('transform', `translate(${cx},${cy}) scale(1,-1) translate(${-cx},${-cy})`);
+      p.appendChild(img);
       defs.appendChild(p);
       path.setAttribute('fill', `url(#${patId})`);
+      if (multiply) {
+        path.setAttribute('style', 'mix-blend-mode:multiply');
+        path.setAttribute('data-tex-bitmap-mul-base', '1');
+      } else {
+        path.removeAttribute('style');
+        path.removeAttribute('data-tex-bitmap-mul-base');
+      }
     });
     return;
   }
@@ -1160,6 +1235,7 @@ function syncLayerCssSpanFill(layerEl, state, layerNum) {
       span.style.removeProperty('-webkit-background-clip');
       span.style.removeProperty('-webkit-text-fill-color');
       span.style.removeProperty('transform');
+      span.style.removeProperty('mix-blend-mode');
     });
   };
 
@@ -1210,13 +1286,16 @@ function syncLayerCssSpanFill(layerEl, state, layerNum) {
       span.style.color = 'transparent';
       span.style.setProperty('-webkit-text-fill-color', 'transparent');
       span.style.backgroundImage = `url(${JSON.stringify(pat.bitmapUrl)})`;
-      if (pat.bitmapPerShape) {
-        span.style.backgroundSize = 'cover';
+      if (pat.kind === 'bitmapshape') {
+        span.style.backgroundSize = pat.bitmapFit === 'cover' ? 'cover' : 'contain';
         span.style.backgroundRepeat = 'no-repeat';
+        if (pat.bitmapMultiply) span.style.mixBlendMode = 'multiply';
+        else span.style.removeProperty('mix-blend-mode');
       } else {
         const tilePx = Math.max(24, Math.min(240, Math.round((Number(pat.bitmapScale) || 100) * 0.96)));
         span.style.backgroundSize = `${tilePx}px ${tilePx}px`;
         span.style.backgroundRepeat = 'repeat';
+        span.style.removeProperty('mix-blend-mode');
       }
       span.style.backgroundPosition = 'center';
       span.style.setProperty('background-clip', 'text');
@@ -1235,8 +1314,27 @@ function syncLayerCssSpanFill(layerEl, state, layerNum) {
   setLayerCssTextureGradientOnly(layerEl, rgba, amt, true, textureFillOptsForLayer(state, layerNum));
 }
 
+function ensureBitmapNaturalSizes(state) {
+  if (!state) return;
+  for (const ln of [1, 2]) {
+    const url = ln === 1 ? state.texturePatternBitmapUrl1 : state.texturePatternBitmapUrl2;
+    const wKey = ln === 1 ? 'texturePatternBitmapNaturalWidth1' : 'texturePatternBitmapNaturalWidth2';
+    const hKey = ln === 1 ? 'texturePatternBitmapNaturalHeight1' : 'texturePatternBitmapNaturalHeight2';
+    if (!url || (Number(state[wKey]) > 0 && Number(state[hKey]) > 0)) continue;
+    if (state[`${wKey}__probing`]) continue;
+    state[`${wKey}__probing`] = true;
+    probeBitmapTextureSize(url).then((s) => {
+      state[`${wKey}__probing`] = false;
+      state[wKey] = s.w;
+      state[hKey] = s.h;
+      if (s.w > 0 && s.h > 0) syncTextureRadial(state);
+    });
+  }
+}
+
 function syncTextureRadial(state) {
   if (!state) return;
+  ensureBitmapNaturalSizes(state);
 
   const layoutCanvasEl = document.getElementById('layout-canvas');
   const lw = layoutCanvasEl?.querySelector('.layout-wrapper');
@@ -1520,12 +1618,12 @@ async function stateWithBitmapDataUrlsForExport(state) {
   let u2 = state.texturePatternBitmapUrl2;
   const need1 =
     layerPatternShouldApply(state, 1) &&
-    texturePatternOptsForLayer(state, 1).kind === 'bitmap' &&
+    isBitmapTextureKind(texturePatternOptsForLayer(state, 1).kind) &&
     u1 &&
     !String(u1).startsWith('data:');
   const need2 =
     layerPatternShouldApply(state, 2) &&
-    texturePatternOptsForLayer(state, 2).kind === 'bitmap' &&
+    isBitmapTextureKind(texturePatternOptsForLayer(state, 2).kind) &&
     u2 &&
     !String(u2).startsWith('data:');
   if (need1) u1 = await resolveImageUrlForSvgExport(u1);
@@ -1633,13 +1731,13 @@ function rollTexturePatternLayer(state, ln) {
   const url2 = state.texturePatternBitmapUrl2;
   const pickKind = (url) => {
     const r = Math.random();
-    if (r < 0.34) return 'stripes';
-    if (r < 0.58) {
-      if (url) return 'bitmap';
+    if (r < 0.28) return 'stripes';
+    if (r < 0.48) {
+      if (url) return Math.random() < 0.5 ? 'bitmap' : 'bitmapshape';
       return Math.random() < 0.5 ? 'stripes' : 'dothatch';
     }
-    if (r < 0.78) return 'dothatch';
-    if (url) return 'bitmap';
+    if (r < 0.68) return 'dothatch';
+    if (url) return Math.random() < 0.5 ? 'bitmap' : 'bitmapshape';
     return Math.random() < 0.5 ? 'stripes' : 'dothatch';
   };
   if (ln === 1) {
@@ -1756,8 +1854,14 @@ function resetNahodneTextureEfekty(state) {
   state.texturePatternBitmapSvgText2 = '';
   state.texturePatternBitmapScale1 = 100;
   state.texturePatternBitmapScale2 = 100;
-  state.texturePatternBitmapPerShape1 = false;
-  state.texturePatternBitmapPerShape2 = false;
+  state.texturePatternBitmapNaturalWidth1 = 0;
+  state.texturePatternBitmapNaturalHeight1 = 0;
+  state.texturePatternBitmapNaturalWidth2 = 0;
+  state.texturePatternBitmapNaturalHeight2 = 0;
+  state.texturePatternBitmapFit1 = 'contain';
+  state.texturePatternBitmapFit2 = 'contain';
+  state.texturePatternBitmapMultiply1 = false;
+  state.texturePatternBitmapMultiply2 = false;
   state.pathOutlineLayer1 = false;
   state.pathOutlineLayer2 = false;
   state.pathOutlineWidth = 0;
@@ -1858,16 +1962,28 @@ function syncTextureSubpanelVisibility(state) {
 
   const k1 = texturePatternKindResolved(state.texturePatternKind1);
   const k2 = texturePatternKindResolved(state.texturePatternKind2);
-  const bm1 = k1 === 'bitmap';
+  const bm1 = isBitmapTextureKind(k1);
   const sw1 = document.getElementById('layout-tex-pat-stripes-wrap-1');
   const bw1 = document.getElementById('layout-tex-pat-bitmap-wrap-1');
   if (sw1) sw1.hidden = bm1;
   if (bw1) bw1.hidden = !bm1;
-  const bm2 = k2 === 'bitmap';
+  const bm2 = isBitmapTextureKind(k2);
   const sw2 = document.getElementById('layout-tex-pat-stripes-wrap-2');
   const bw2 = document.getElementById('layout-tex-pat-bitmap-wrap-2');
   if (sw2) sw2.hidden = bm2;
   if (bw2) bw2.hidden = !bm2;
+  const bt1 = document.getElementById('layout-tex-pat-bitmap-title-1');
+  if (bt1) bt1.textContent = k1 === 'bitmapshape' ? 'Bitmapa v tvarech' : 'Bitmapa';
+  const bt2 = document.getElementById('layout-tex-pat-bitmap-title-2');
+  if (bt2) bt2.textContent = k2 === 'bitmapshape' ? 'Bitmapa v tvarech' : 'Bitmapa';
+  const swrap1 = document.getElementById('layout-texture-pat-bitmap-scale-wrap-1');
+  if (swrap1) swrap1.hidden = k1 === 'bitmapshape';
+  const swrap2 = document.getElementById('layout-texture-pat-bitmap-scale-wrap-2');
+  if (swrap2) swrap2.hidden = k2 === 'bitmapshape';
+  const fwrap1 = document.getElementById('layout-texture-pat-bitmap-fit-wrap-1');
+  if (fwrap1) fwrap1.hidden = k1 !== 'bitmapshape';
+  const fwrap2 = document.getElementById('layout-texture-pat-bitmap-fit-wrap-2');
+  if (fwrap2) fwrap2.hidden = k2 !== 'bitmapshape';
 }
 
 function bitmapTextureFileAllowed(file) {
@@ -1881,6 +1997,9 @@ function bitmapTextureFileAllowed(file) {
 function revokeTexturePatternBitmap(state, layerNum) {
   const uKey = layerNum === 1 ? 'texturePatternBitmapUrl1' : 'texturePatternBitmapUrl2';
   const nameKey = layerNum === 1 ? 'texturePatternBitmapFilename1' : 'texturePatternBitmapFilename2';
+  const svgKey = layerNum === 1 ? 'texturePatternBitmapSvgText1' : 'texturePatternBitmapSvgText2';
+  const wKey = layerNum === 1 ? 'texturePatternBitmapNaturalWidth1' : 'texturePatternBitmapNaturalWidth2';
+  const hKey = layerNum === 1 ? 'texturePatternBitmapNaturalHeight1' : 'texturePatternBitmapNaturalHeight2';
   const cur = state[uKey];
   if (cur && String(cur).startsWith('blob:')) {
     try {
@@ -1889,6 +2008,9 @@ function revokeTexturePatternBitmap(state, layerNum) {
   }
   state[uKey] = '';
   state[nameKey] = '';
+  state[svgKey] = '';
+  state[wKey] = 0;
+  state[hKey] = 0;
 }
 
 function refreshTexturePatParamLabelsFromState(state) {
@@ -1915,19 +2037,23 @@ function syncTexturePatternControlsFromState(state) {
   const k1 = texturePatternKindResolved(state.texturePatternKind1);
   const s1 = document.getElementById('layout-texture-pat-stripes-1');
   const b1 = document.getElementById('layout-texture-pat-bitmap-1');
+  const bs1 = document.getElementById('layout-texture-pat-bitmapshape-1');
   const d1 = document.getElementById('layout-texture-pat-dothatch-1');
-  if (s1 && b1 && d1) {
+  if (s1 && b1 && bs1 && d1) {
     s1.checked = k1 === 'stripes';
     b1.checked = k1 === 'bitmap';
+    bs1.checked = k1 === 'bitmapshape';
     d1.checked = k1 === 'dothatch';
   }
   const k2 = texturePatternKindResolved(state.texturePatternKind2);
   const s2 = document.getElementById('layout-texture-pat-stripes-2');
   const b2 = document.getElementById('layout-texture-pat-bitmap-2');
+  const bs2 = document.getElementById('layout-texture-pat-bitmapshape-2');
   const d2 = document.getElementById('layout-texture-pat-dothatch-2');
-  if (s2 && b2 && d2) {
+  if (s2 && b2 && bs2 && d2) {
     s2.checked = k2 === 'stripes';
     b2.checked = k2 === 'bitmap';
+    bs2.checked = k2 === 'bitmapshape';
     d2.checked = k2 === 'dothatch';
   }
   const a1 = document.getElementById('layout-texture-pat-angle-1');
@@ -1953,10 +2079,20 @@ function syncTexturePatternControlsFromState(state) {
   const sc2l = document.getElementById('layout-texture-pat-bitmap-scale-2-label');
   if (sc2) sc2.value = String(state.texturePatternBitmapScale2 ?? 100);
   if (sc2l) sc2l.textContent = `Dlaždice: ${state.texturePatternBitmapScale2 ?? 100}%`;
-  const bps1 = document.getElementById('layout-texture-pat-bitmap-per-shape-1');
-  if (bps1) bps1.checked = !!state.texturePatternBitmapPerShape1;
-  const bps2 = document.getElementById('layout-texture-pat-bitmap-per-shape-2');
-  if (bps2) bps2.checked = !!state.texturePatternBitmapPerShape2;
+  const fit1 = state.texturePatternBitmapFit1 === 'cover' ? 'cover' : 'contain';
+  const fitC1 = document.getElementById('layout-texture-pat-bitmap-fit-contain-1');
+  const fitV1 = document.getElementById('layout-texture-pat-bitmap-fit-cover-1');
+  if (fitC1) fitC1.checked = fit1 === 'contain';
+  if (fitV1) fitV1.checked = fit1 === 'cover';
+  const fit2 = state.texturePatternBitmapFit2 === 'cover' ? 'cover' : 'contain';
+  const fitC2 = document.getElementById('layout-texture-pat-bitmap-fit-contain-2');
+  const fitV2 = document.getElementById('layout-texture-pat-bitmap-fit-cover-2');
+  if (fitC2) fitC2.checked = fit2 === 'contain';
+  if (fitV2) fitV2.checked = fit2 === 'cover';
+  const mul1 = document.getElementById('layout-texture-pat-bitmap-multiply-1');
+  if (mul1) mul1.checked = !!state.texturePatternBitmapMultiply1;
+  const mul2 = document.getElementById('layout-texture-pat-bitmap-multiply-2');
+  if (mul2) mul2.checked = !!state.texturePatternBitmapMultiply2;
   const bn1 = document.getElementById('layout-texture-pat-bitmap-name-1');
   if (bn1) {
     const fn1 = String(state.texturePatternBitmapFilename1 || '').trim();
@@ -4364,8 +4500,14 @@ export function initLayout(containerId) {
         texturePatternBitmapSvgText2: '',
         texturePatternBitmapScale1: 100,
         texturePatternBitmapScale2: 100,
-        texturePatternBitmapPerShape1: false,
-        texturePatternBitmapPerShape2: false,
+        texturePatternBitmapNaturalWidth1: 0,
+        texturePatternBitmapNaturalHeight1: 0,
+        texturePatternBitmapNaturalWidth2: 0,
+        texturePatternBitmapNaturalHeight2: 0,
+        texturePatternBitmapFit1: 'contain',
+        texturePatternBitmapFit2: 'contain',
+        texturePatternBitmapMultiply1: false,
+        texturePatternBitmapMultiply2: false,
         pathOutlineLayer1: false,
         pathOutlineLayer2: false,
         pathOutlineWidth: 0,
@@ -5364,29 +5506,50 @@ export function initLayout(containerId) {
         state.texturePatternEnabled2 = !!e.target.checked;
         syncTextureRadial(state);
       });
-      document.getElementById('layout-texture-pat-bitmap-per-shape-1')?.addEventListener('change', (e) => {
-        state.texturePatternBitmapPerShape1 = !!e.target.checked;
-        syncTextureRadial(state);
-      });
-      document.getElementById('layout-texture-pat-bitmap-per-shape-2')?.addEventListener('change', (e) => {
-        state.texturePatternBitmapPerShape2 = !!e.target.checked;
-        syncTextureRadial(state);
-      });
 
       const bindPatKindGroup = (name, kindKey) => {
         document.querySelectorAll(`input[name="${name}"]`).forEach((el) => {
           el.addEventListener('change', (e) => {
             if (!e.target.checked) return;
             const v = e.target.value;
-            state[kindKey] = v === 'bitmap' ? 'bitmap' : v === 'dothatch' ? 'dothatch' : 'stripes';
+            state[kindKey] =
+              v === 'bitmap'
+                ? 'bitmap'
+                : v === 'bitmapshape'
+                  ? 'bitmapshape'
+                  : v === 'dothatch'
+                    ? 'dothatch'
+                    : 'stripes';
             syncTextureSubpanelVisibility(state);
             refreshTexturePatParamLabelsFromState(state);
+            syncTexturePatternControlsFromState(state);
             syncTextureRadial(state);
           });
         });
       };
       bindPatKindGroup('layout-tex-pat-kind-1', 'texturePatternKind1');
       bindPatKindGroup('layout-tex-pat-kind-2', 'texturePatternKind2');
+
+      const bindBitmapFitGroup = (name, fitKey) => {
+        document.querySelectorAll(`input[name="${name}"]`).forEach((el) => {
+          el.addEventListener('change', (e) => {
+            if (!e.target.checked) return;
+            state[fitKey] = e.target.value === 'cover' ? 'cover' : 'contain';
+            syncTextureRadial(state);
+          });
+        });
+      };
+      bindBitmapFitGroup('layout-tex-pat-bitmap-fit-1', 'texturePatternBitmapFit1');
+      bindBitmapFitGroup('layout-tex-pat-bitmap-fit-2', 'texturePatternBitmapFit2');
+
+      document.getElementById('layout-texture-pat-bitmap-multiply-1')?.addEventListener('change', (e) => {
+        state.texturePatternBitmapMultiply1 = !!e.target.checked;
+        syncTextureRadial(state);
+      });
+      document.getElementById('layout-texture-pat-bitmap-multiply-2')?.addEventListener('change', (e) => {
+        state.texturePatternBitmapMultiply2 = !!e.target.checked;
+        syncTextureRadial(state);
+      });
 
       document.getElementById('layout-texture-pat-angle-1')?.addEventListener('input', (e) => {
         state.texturePatternStripesAngle1 = Number(e.target.value) || 0;
@@ -5467,6 +5630,9 @@ export function initLayout(containerId) {
         }
         state.texturePatternBitmapUrl1 = URL.createObjectURL(f);
         state.texturePatternBitmapFilename1 = f.name || '';
+        const size1 = await probeBitmapTextureSize(state.texturePatternBitmapUrl1);
+        state.texturePatternBitmapNaturalWidth1 = size1.w;
+        state.texturePatternBitmapNaturalHeight1 = size1.h;
         e.target.value = '';
         syncTexturePatternControlsFromState(state);
         syncTextureRadial(state);
@@ -5509,6 +5675,9 @@ export function initLayout(containerId) {
         }
         state.texturePatternBitmapUrl2 = URL.createObjectURL(f);
         state.texturePatternBitmapFilename2 = f.name || '';
+        const size2 = await probeBitmapTextureSize(state.texturePatternBitmapUrl2);
+        state.texturePatternBitmapNaturalWidth2 = size2.w;
+        state.texturePatternBitmapNaturalHeight2 = size2.h;
         e.target.value = '';
         syncTexturePatternControlsFromState(state);
         syncTextureRadial(state);

@@ -445,7 +445,11 @@ body.testing-page {
   opacity: 0.92;
 }
 
-.layout-tex-subsection[hidden] {
+.layout-tex-subsection[hidden],
+#layout-texture-pat-bitmap-scale-wrap-1[hidden],
+#layout-texture-pat-bitmap-scale-wrap-2[hidden],
+#layout-texture-pat-bitmap-fit-wrap-1[hidden],
+#layout-texture-pat-bitmap-fit-wrap-2[hidden] {
   display: none !important;
 }
 
