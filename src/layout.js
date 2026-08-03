@@ -949,6 +949,48 @@ function fitRectInBBox(bb, imgW, imgH, fit) {
   };
 }
 
+function withSvgConnected(svgEl, fn) {
+  if (!svgEl || svgEl.isConnected) return fn();
+  const prevParent = svgEl.parentNode;
+  const prevNext = svgEl.nextSibling;
+  const holder = document.createElement('div');
+  const sw = parseFloat(svgEl.getAttribute('width')) || 0;
+  const sh = parseFloat(svgEl.getAttribute('height')) || 0;
+  holder.style.cssText = `position:fixed;left:-100000px;top:0;width:${sw > 0 ? sw : 1}px;height:${sh > 0 ? sh : 1}px;overflow:hidden;visibility:hidden;pointer-events:none;`;
+  document.body.appendChild(holder);
+  holder.appendChild(svgEl);
+  try {
+    return fn();
+  } finally {
+    if (prevParent) {
+      if (prevNext) prevParent.insertBefore(svgEl, prevNext);
+      else prevParent.appendChild(svgEl);
+    } else if (svgEl.parentNode === holder) {
+      holder.removeChild(svgEl);
+    }
+    holder.remove();
+  }
+}
+
+function pathLocalBBoxFromD(d) {
+  if (!d || typeof document === 'undefined') return null;
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  const p = document.createElementNS(SVG_NS, 'path');
+  p.setAttribute('d', d);
+  svg.setAttribute('width', '1');
+  svg.setAttribute('height', '1');
+  svg.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;left:-9999px;top:-9999px';
+  svg.appendChild(p);
+  document.body.appendChild(svg);
+  let bb = null;
+  try {
+    bb = p.getBBox();
+  } catch {}
+  document.body.removeChild(svg);
+  if (!bb || !(bb.width > 0) || !(bb.height > 0)) return null;
+  return { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
+}
+
 function applyBitmapPatternToSvgPaths(defs, paths, pat) {
   const doc = defs.ownerDocument || document;
   const sc = Math.max(0.25, Math.min(4, (Number(pat.bitmapScale) || 100) / 100));
@@ -964,12 +1006,7 @@ function applyBitmapPatternToSvgPaths(defs, paths, pat) {
       if (path.getAttribute('data-tex-bitmap-mul') === '1') return;
       const rawFill = path.getAttribute('fill') || '#000000';
       if (rawFill.includes('url(')) return;
-      let bb;
-      try {
-        bb = path.getBBox();
-      } catch {
-        return;
-      }
+      const bb = pathLocalBBoxFromD(path.getAttribute('d'));
       if (!bb || !(bb.width > 0) || !(bb.height > 0) || !href) return;
       path.setAttribute('data-tex-orig-fill', rawFill);
       const place = fitRectInBBox(bb, imgW, imgH, fit);
@@ -1616,6 +1653,10 @@ async function stateWithBitmapDataUrlsForExport(state) {
   if (!state) return state;
   let u1 = state.texturePatternBitmapUrl1;
   let u2 = state.texturePatternBitmapUrl2;
+  let w1 = Number(state.texturePatternBitmapNaturalWidth1) || 0;
+  let h1 = Number(state.texturePatternBitmapNaturalHeight1) || 0;
+  let w2 = Number(state.texturePatternBitmapNaturalWidth2) || 0;
+  let h2 = Number(state.texturePatternBitmapNaturalHeight2) || 0;
   const need1 =
     layerPatternShouldApply(state, 1) &&
     isBitmapTextureKind(texturePatternOptsForLayer(state, 1).kind) &&
@@ -1628,7 +1669,27 @@ async function stateWithBitmapDataUrlsForExport(state) {
     !String(u2).startsWith('data:');
   if (need1) u1 = await resolveImageUrlForSvgExport(u1);
   if (need2) u2 = await resolveImageUrlForSvgExport(u2);
-  if (need1 || need2) return { ...state, texturePatternBitmapUrl1: u1, texturePatternBitmapUrl2: u2 };
+  if (u1 && !(w1 > 0 && h1 > 0)) {
+    const s = await probeBitmapTextureSize(u1);
+    w1 = s.w;
+    h1 = s.h;
+  }
+  if (u2 && !(w2 > 0 && h2 > 0)) {
+    const s = await probeBitmapTextureSize(u2);
+    w2 = s.w;
+    h2 = s.h;
+  }
+  if (need1 || need2 || w1 || h1 || w2 || h2) {
+    return {
+      ...state,
+      texturePatternBitmapUrl1: u1,
+      texturePatternBitmapUrl2: u2,
+      texturePatternBitmapNaturalWidth1: w1,
+      texturePatternBitmapNaturalHeight1: h1,
+      texturePatternBitmapNaturalWidth2: w2,
+      texturePatternBitmapNaturalHeight2: h2
+    };
+  }
   return state;
 }
 
@@ -1643,7 +1704,9 @@ async function finalizeSvgForExport(svgStr, state) {
   if (!root.getAttribute('xmlns:xlink')) {
     root.setAttribute('xmlns:xlink', XLINK_NS);
   }
-  syncTextureFillSvgDoc(root, exportState);
+  withSvgConnected(root, () => {
+    syncTextureFillSvgDoc(root, exportState);
+  });
   applySvgExportBlur(root, exportState);
   await embedSvgImageHrefsAsDataUrls(root);
   const serialized = new XMLSerializer().serializeToString(root);
@@ -3537,8 +3600,20 @@ function downloadBlob(blob, filename) {
 
 function svgToPngBlob(svgString, width, height, bgHex = '#ffffff') {
   return new Promise((resolve, reject) => {
+    let svgForRaster = svgString;
+    try {
+      const parser = new DOMParser();
+      const pdoc = parser.parseFromString(String(svgString || ''), 'image/svg+xml');
+      const root = pdoc.documentElement;
+      if (root && root.localName === 'svg') {
+        root.setAttribute('width', String(width));
+        root.setAttribute('height', String(height));
+        if (!root.getAttribute('xmlns')) root.setAttribute('xmlns', SVG_NS);
+        svgForRaster = new XMLSerializer().serializeToString(root);
+      }
+    } catch {}
     const img = new Image();
-    const blob = new Blob([svgString], { type: 'image/svg+xml' });
+    const blob = new Blob([svgForRaster], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -3561,16 +3636,169 @@ function svgToPngBlob(svgString, width, height, bgHex = '#ffffff') {
   });
 }
 
-function canvasToBlob(canvas) {
-  return new Promise((resolve) => canvas.toBlob(resolve));
+function viewBoxAttrFromSvgString(svgStr) {
+  const m = /viewBox\s*=\s*"([^"]+)"/i.exec(String(svgStr || ''));
+  return m ? m[1] : null;
+}
+
+function liveLayoutSvgRoot() {
+  const wrap = document.getElementById('layout-canvas')?.querySelector('.layout-wrapper');
+  if (!wrap) return null;
+  const svgs = Array.from(wrap.querySelectorAll('svg'));
+  const combined = svgs.find((s) => s.querySelector('#layer1') || s.querySelector('g[data-layout-pair-cutout="1"]'));
+  return combined || null;
+}
+
+function pathBBoxInSvgUserSpace(pathEl) {
+  let bb = null;
+  try {
+    bb = pathEl.getBBox();
+  } catch {}
+  if (!bb || !(bb.width > 0) || !(bb.height > 0)) {
+    bb = pathLocalBBoxFromD(pathEl.getAttribute('d'));
+  }
+  if (!bb || !(bb.width > 0) || !(bb.height > 0)) return null;
+  let mat = null;
+  try {
+    mat = pathEl.transform?.baseVal?.consolidate()?.matrix || null;
+  } catch {
+    mat = null;
+  }
+  if (!mat) return { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
+  const corners = [
+    [bb.x, bb.y],
+    [bb.x + bb.width, bb.y],
+    [bb.x + bb.width, bb.y + bb.height],
+    [bb.x, bb.y + bb.height]
+  ].map(([x, y]) => ({
+    x: mat.a * x + mat.c * y + mat.e,
+    y: mat.b * x + mat.d * y + mat.f
+  }));
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const width = maxX - minX;
+  const height = maxY - minY;
+  if (!(width > 0) || !(height > 0)) return null;
+  return { x: minX, y: minY, width, height };
+}
+
+function flattenBitmapShapePatternsForExport(svgRoot, state) {
+  if (!svgRoot) return;
+  withSvgConnected(svgRoot, () => {
+    const doc = svgRoot.ownerDocument || document;
+    let defs = svgRoot.querySelector('defs');
+    if (!defs) {
+      defs = doc.createElementNS(SVG_NS, 'defs');
+      svgRoot.insertBefore(defs, svgRoot.firstChild);
+    }
+    const patternsToRemove = new Set();
+    Array.from(svgRoot.querySelectorAll('path')).forEach((path) => {
+      const fill = path.getAttribute('fill') || '';
+      const m = /url\(#([^)]+)\)/.exec(fill);
+      if (!m) return;
+      const pat = defs.querySelector(`#${m[1]}`);
+      if (!pat || String(pat.localName || '').toLowerCase() !== 'pattern') return;
+      if (pat.getAttribute('data-texfill') !== '1') return;
+      if (pat.getAttribute('patternUnits') !== 'objectBoundingBox') return;
+      if (!pat.getAttribute('viewBox')) return;
+      const imgEl = pat.querySelector('image');
+      if (!imgEl) return;
+      const href = imgEl.getAttribute('href') || imgEl.getAttributeNS(XLINK_NS, 'href');
+      if (!href) return;
+      const bb = pathBBoxInSvgUserSpace(path);
+      if (!bb) return;
+
+      const layer = path.getAttribute('data-tex-layer');
+      const ln = layer === '2' ? 2 : 1;
+      const fit =
+        (ln === 1 ? state?.texturePatternBitmapFit1 : state?.texturePatternBitmapFit2) === 'cover'
+          ? 'cover'
+          : 'contain';
+      const multiply =
+        !!(ln === 1 ? state?.texturePatternBitmapMultiply1 : state?.texturePatternBitmapMultiply2) ||
+        path.getAttribute('data-tex-bitmap-mul-base') === '1' ||
+        String(path.getAttribute('style') || '').includes('multiply');
+      const bgRect = pat.querySelector('rect');
+      const solidFill =
+        path.getAttribute('data-tex-orig-fill') || bgRect?.getAttribute('fill') || '#000000';
+
+      const clipId = `texclip-${++textureRadialIdSeq}`;
+      const clip = doc.createElementNS(SVG_NS, 'clipPath');
+      clip.setAttribute('id', clipId);
+      clip.setAttribute('clipPathUnits', 'userSpaceOnUse');
+      clip.setAttribute('data-texfill', '1');
+      const clipPath = doc.createElementNS(SVG_NS, 'path');
+      clipPath.setAttribute('d', path.getAttribute('d') || '');
+      const tr = path.getAttribute('transform');
+      if (tr) clipPath.setAttribute('transform', tr);
+      clip.appendChild(clipPath);
+      defs.appendChild(clip);
+
+      const image = doc.createElementNS(SVG_NS, 'image');
+      image.setAttribute('href', href);
+      image.setAttributeNS(XLINK_NS, 'xlink:href', href);
+      image.setAttribute('x', String(bb.x));
+      image.setAttribute('y', String(bb.y));
+      image.setAttribute('width', String(bb.width));
+      image.setAttribute('height', String(bb.height));
+      image.setAttribute('preserveAspectRatio', fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet');
+      image.setAttribute('clip-path', `url(#${clipId})`);
+      image.setAttribute('data-texfill', '1');
+      if (multiply) image.setAttribute('style', 'mix-blend-mode:multiply');
+
+      if (multiply) path.setAttribute('fill', 'none');
+      else path.setAttribute('fill', solidFill);
+      path.removeAttribute('style');
+      path.removeAttribute('data-tex-bitmap-mul-base');
+      path.parentNode?.insertBefore(image, path.nextSibling);
+      patternsToRemove.add(pat);
+    });
+    patternsToRemove.forEach((pat) => {
+      const id = pat.getAttribute('id');
+      if (!id) return;
+      if (!svgRoot.querySelector(`path[fill="url(#${id})"]`)) pat.remove();
+    });
+  });
+}
+
+async function buildLayoutSvgForExport(shapes, state) {
+  const live = liveLayoutSvgRoot();
+  if (live) {
+    const clone = live.cloneNode(true);
+    clone.setAttribute('xmlns', SVG_NS);
+    if (!clone.getAttribute('xmlns:xlink')) clone.setAttribute('xmlns:xlink', XLINK_NS);
+    const vb = viewBoxAttrFromSvgString(shapes?.layoutSvgExport || shapes?.layoutSvg);
+    if (vb) clone.setAttribute('viewBox', vb);
+    clone.setAttribute('width', `${A1_LANDSCAPE_W_MM}mm`);
+    clone.setAttribute('height', `${A1_LANDSCAPE_H_MM}mm`);
+    clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    flattenBitmapShapePatternsForExport(clone, state);
+    await embedSvgImageHrefsAsDataUrls(clone);
+    return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
+  }
+  const fallback = await finalizeSvgForExport(shapes?.layoutSvgExport || shapes?.layoutSvg, state);
+  try {
+    const parser = new DOMParser();
+    const pdoc = parser.parseFromString(fallback, 'image/svg+xml');
+    const root = pdoc.documentElement;
+    if (root && root.localName === 'svg') {
+      flattenBitmapShapePatternsForExport(root, state);
+      await embedSvgImageHrefsAsDataUrls(root);
+      return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(root)}`;
+    }
+  } catch {}
+  return fallback;
 }
 
 async function saveLayoutPng(shapes, canvasBg, state) {
   if (!shapes) return;
   const bg = normalizedCanvasBgHex(canvasBg);
   const ts = layoutTimestamp();
-  let layoutSvgForFile = shapes.layoutSvgExport || shapes.layoutSvg;
-  layoutSvgForFile = await finalizeSvgForExport(layoutSvgForFile, state);
+  const layoutSvgForFile = await buildLayoutSvgForExport(shapes, state);
   const layoutW = shapes.layoutExportW ?? CANVAS_W;
   const layoutH = shapes.layoutExportH ?? CANVAS_H;
   const layoutBlob = await svgToPngBlob(layoutSvgForFile, layoutW, layoutH, bg);
@@ -4329,8 +4557,7 @@ function displayShapesAsSvg(layoutSvg, posterSvg, layoutContainer, options = {})
 async function saveLayoutSvg(shapes, state) {
   if (!shapes) return;
   const ts = layoutTimestamp();
-  let layoutSvgForFile = shapes.layoutSvgExport || shapes.layoutSvg;
-  layoutSvgForFile = await finalizeSvgForExport(layoutSvgForFile, state);
+  const layoutSvgForFile = await buildLayoutSvgForExport(shapes, state);
   downloadBlob(new Blob([layoutSvgForFile], { type: 'image/svg+xml' }), `layout_${ts}.svg`);
 }
 
